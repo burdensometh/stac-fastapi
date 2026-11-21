@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Partial CQL2 pushdown for backends that can fetch candidates (for example by collection and time) but cannot execute full CQL2. `stac_fastapi.types.cql2` parses `cql2-json`/`cql2-text`, splits a filter into a pushable fragment and a locally-evaluated residual (`split_filter`), and evaluates the residual against Items (`evaluate`). `AND`/`OR`/`NOT` are handled structurally so no term is dropped, and predicates that can neither be pushed nor evaluated locally are rejected with `UnsupportedCql2Function` (a `400`) instead of being silently ignored. `stac_fastapi.types.partial.PartialPushdownSearch` reads candidate pages, applies the residual locally and paginates over matching Items only, reading further candidate pages when needed. `numberMatched` is reported only when it is consistent with the search (exact pushdown, or all candidates drained) and is otherwise omitted.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed
