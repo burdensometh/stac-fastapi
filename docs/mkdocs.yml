@@ -73,6 +73,12 @@ nav:
               - module: api/stac_fastapi/extensions/query/index.md
               - query: api/stac_fastapi/extensions/query/query.md
               - request: api/stac_fastapi/extensions/query/request.md
+          - revisions:
+              - module: api/stac_fastapi/extensions/revisions/index.md
+              - client: api/stac_fastapi/extensions/revisions/client.md
+              - recording: api/stac_fastapi/extensions/revisions/recording.md
+              - revisions: api/stac_fastapi/extensions/revisions/revisions.md
+              - store: api/stac_fastapi/extensions/revisions/store.md
           - sort:
               - module: api/stac_fastapi/extensions/sort/index.md
               - request: api/stac_fastapi/extensions/sort/request.md
@@ -87,6 +93,7 @@ nav:
           - extension: api/stac_fastapi/types/extension.md
           - links: api/stac_fastapi/types/links.md
           - requests: api/stac_fastapi/types/requests.md
+          - revisions: api/stac_fastapi/types/revisions.md
           - rfc3339: api/stac_fastapi/types/rfc3339.md
           - search: api/stac_fastapi/types/search.md
           - stac: api/stac_fastapi/types/stac.md

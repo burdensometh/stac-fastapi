@@ -17,6 +17,7 @@ from stac_fastapi.types.errors import (
     ForeignKeyError,
     InvalidQueryParameter,
     NotFoundError,
+    RebaselineRequiredError,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_STATUS_CODES = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     ConflictError: status.HTTP_409_CONFLICT,
+    RebaselineRequiredError: status.HTTP_410_GONE,
     ForeignKeyError: status.HTTP_424_FAILED_DEPENDENCY,
     DatabaseError: status.HTTP_424_FAILED_DEPENDENCY,
     InvalidQueryParameter: status.HTTP_400_BAD_REQUEST,

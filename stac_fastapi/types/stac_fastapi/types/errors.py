@@ -39,3 +39,15 @@ class InvalidQueryParameter(StacApiError):
     """
 
     pass
+
+
+class RebaselineRequiredError(StacApiError):
+    """The revision stream cursor is outside the retained window.
+
+    Raised when a reader of the revision stream resumes from a cursor that is
+    older than the oldest retained event, or ahead of the stream head (e.g.
+    after the stream was reset). The reader must re-baseline from a full
+    catalog snapshot before resuming the stream.
+    """
+
+    pass

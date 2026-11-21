@@ -11,6 +11,7 @@ Types submodule.
 * [stac_fastapi.types.extension](extension.md)
 * [stac_fastapi.types.links](links.md)
 * [stac_fastapi.types.requests](requests.md)
+* [stac_fastapi.types.revisions](revisions.md)
 * [stac_fastapi.types.rfc3339](rfc3339.md)
 * [stac_fastapi.types.search](search.md)
 * [stac_fastapi.types.stac](stac.md)

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Optional Item revision stream (change feed) for the transaction and bulk-transaction extensions, so a downstream catalog can synchronize Item creations, updates and deletions:
+  - New `stac_fastapi.types.revisions` module with `RevisionEvent` / `RevisionFeed` models. Every committed Item change is recorded with a stream-wide, gapless sequence number; all events of one committed write share a `batch` identifier. `upsert` events carry the committed Item when available; `delete` events carry the `collection_id`/`item_id` identity needed to remove the Item downstream.
+  - New `RevisionStreamExtension` (`stac_fastapi.extensions.revisions`) adding `GET /revisions?cursor=&limit=`. Readers resume from the sequence number of the last applied event and apply events keyed by `(collection_id, item_id)`. A cursor outside the retained window (trimmed by retention, or ahead of the stream head) is answered with `410 Gone` and a `RebaselineRequiredError` code, requiring a re-baseline from a full catalog snapshot.
+  - New `revision_store` parameter on `TransactionExtension` and `BulkTransactionExtension`. When set, successful Item creates, updates, patches, deletes and bulk inserts are appended to the store as one batch per committed write; failed commits record no events. `RevisionStore` / `AsyncRevisionStore` ABCs are provided for backends, together with an `InMemoryRevisionStore` reference implementation with count-based retention.
+  - New `RebaselineRequiredError` in `stac_fastapi.types.errors`, mapped to `410 Gone` by default.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed

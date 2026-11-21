@@ -16,6 +16,14 @@ from starlette.routing import NoMatchFound
 
 from stac_fastapi.api.models import CollectionUri, ItemUri, JSONResponse
 from stac_fastapi.api.routes import create_async_endpoint
+from stac_fastapi.extensions.revisions.recording import (
+    create_item_events,
+    delete_item_events,
+    patch_item_events,
+    record_on_success,
+    update_item_events,
+)
+from stac_fastapi.extensions.revisions.store import AsyncRevisionStore, RevisionStore
 from stac_fastapi.types.config import ApiSettings
 from stac_fastapi.types.extension import ApiExtension
 
@@ -185,6 +193,13 @@ class TransactionExtension(ApiExtension):
 
     Attributes:
         client: CRUD application logic
+        revision_store: optional revision store. When set, every successful
+            Item change (create, update, patch, delete) is recorded as a
+            batch of revision events, exposing a change feed that the
+            `RevisionStreamExtension` serves at `GET /revisions`. Failed
+            commits record no events. Backends that persist revision events
+            in the same database transaction as the Item changes should do
+            so inside their client and leave this unset.
 
     """
 
@@ -200,10 +215,19 @@ class TransactionExtension(ApiExtension):
     router: APIRouter = attr.ib(factory=APIRouter)
     response_class: type[Response] = attr.ib(default=JSONResponse)
     route_dependencies: Sequence[Depends] | None = attr.ib(default=None)
+    revision_store: RevisionStore | AsyncRevisionStore | None = attr.ib(default=None)
+
+    def _recorded(self, func, events_builder):
+        """Wrap a client method so successful calls append revision events."""
+        if self.revision_store is None:
+            return func
+        return record_on_success(self.revision_store, func, events_builder)
 
     def register_create_item(self):
         """Register create item endpoint (POST /collections/{collection_id}/items)."""
-        endpoint = create_async_endpoint(self.client.create_item, PostItem)
+        endpoint = create_async_endpoint(
+            self._recorded(self.client.create_item, create_item_events), PostItem
+        )
 
         async def create_item(
             request: Request,
@@ -278,7 +302,9 @@ class TransactionExtension(ApiExtension):
             response_model_exclude_unset=True,
             response_model_exclude_none=True,
             methods=["PUT"],
-            endpoint=create_async_endpoint(self.client.update_item, PutItem),
+            endpoint=create_async_endpoint(
+                self._recorded(self.client.update_item, update_item_events), PutItem
+            ),
             dependencies=self.route_dependencies,
         )
 
@@ -318,7 +344,7 @@ class TransactionExtension(ApiExtension):
             response_model_exclude_none=True,
             methods=["PATCH"],
             endpoint=create_async_endpoint(
-                self.client.patch_item,
+                self._recorded(self.client.patch_item, patch_item_events),
                 PatchItem,
             ),
             dependencies=self.route_dependencies,
@@ -343,7 +369,9 @@ class TransactionExtension(ApiExtension):
             response_model_exclude_unset=True,
             response_model_exclude_none=True,
             methods=["DELETE"],
-            endpoint=create_async_endpoint(self.client.delete_item, ItemUri),
+            endpoint=create_async_endpoint(
+                self._recorded(self.client.delete_item, delete_item_events), ItemUri
+            ),
             dependencies=self.route_dependencies,
         )
 

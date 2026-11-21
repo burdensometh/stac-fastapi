@@ -13,6 +13,11 @@ from pydantic import BaseModel
 
 from stac_fastapi.api.models import create_request_model
 from stac_fastapi.api.routes import create_async_endpoint
+from stac_fastapi.extensions.revisions.recording import (
+    bulk_item_events,
+    record_on_success,
+)
+from stac_fastapi.extensions.revisions.store import AsyncRevisionStore, RevisionStore
 from stac_fastapi.types.extension import ApiExtension
 
 
@@ -150,6 +155,7 @@ class BulkTransactionExtension(ApiExtension):
     schema_href: str | None = attr.ib(default=None)
     route_dependencies: Sequence[Depends] | None = attr.ib(default=None)
     enable_response_models: bool = attr.ib(default=True)
+    revision_store: RevisionStore | AsyncRevisionStore | None = attr.ib(default=None)
 
     def register(self, app: FastAPI) -> None:
         """Register the extension with a FastAPI application.
@@ -161,6 +167,14 @@ class BulkTransactionExtension(ApiExtension):
             None
         """
         items_request_model = create_request_model("Items", base_model=Items)
+
+        bulk_item_insert = self.client.bulk_item_insert
+        if self.revision_store is not None:
+            # successful items of each committed bulk write join the same
+            # revision stream as the other transaction endpoints
+            bulk_item_insert = record_on_success(
+                self.revision_store, bulk_item_insert, bulk_item_events
+            )
 
         router = APIRouter(prefix=app.state.router_prefix)
         router.add_api_route(
@@ -178,9 +192,7 @@ class BulkTransactionExtension(ApiExtension):
             response_class=JSONResponse,
             response_model_exclude_unset=False,
             methods=["POST"],
-            endpoint=create_async_endpoint(
-                self.client.bulk_item_insert, items_request_model
-            ),
+            endpoint=create_async_endpoint(bulk_item_insert, items_request_model),
             dependencies=self.route_dependencies,
         )
         app.include_router(router, tags=["Bulk Transaction Extension"])

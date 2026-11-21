@@ -12,5 +12,6 @@ Extensions submodule.
 * [stac_fastapi.extensions.free_text](free_text/index.md)
 * [stac_fastapi.extensions.pagination](pagination/index.md)
 * [stac_fastapi.extensions.query](query/index.md)
+* [stac_fastapi.extensions.revisions](revisions/index.md)
 * [stac_fastapi.extensions.sort](sort/index.md)
 * [stac_fastapi.extensions.transaction](transaction.md)
