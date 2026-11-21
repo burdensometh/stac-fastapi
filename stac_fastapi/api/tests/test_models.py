@@ -44,7 +44,8 @@ def test_create_get_request_model():
     assert model.filter_crs == "epsg:4326"
     d = model.start_date
     assert d.microsecond == 10
-    assert not model.end_date
+    # a single datetime is a closed point interval: end_date == start_date
+    assert model.end_date == model.start_date
 
     model = request_model(bbox="0,0,0,1,1,1")
     assert model.bbox == (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)

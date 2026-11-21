@@ -4,9 +4,9 @@ from datetime import datetime as dt
 from typing import Annotated, cast
 
 import attr
-from fastapi import Query
+from fastapi import HTTPException, Query
 from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator
-from stac_pydantic.shared import BBox, SearchDatetime
+from stac_pydantic.shared import BBox
 
 from stac_fastapi.types.search import (
     APIRequest,
@@ -16,6 +16,7 @@ from stac_fastapi.types.search import (
     _bbox_converter,
     _validate_datetime,
 )
+from stac_fastapi.types.temporal import DateTimeInterval, parse_datetime_interval
 
 
 @attr.s
@@ -79,13 +80,31 @@ Either a date-time or an interval, open or closed. Date and time expressions adh
     # Properties to return the private values
     @property
     def start_date(self) -> dt | None:
-        """start date."""
+        """Start Date (UTC), or None if the interval is open or unset."""
         return self._start_date
 
     @property
     def end_date(self) -> dt | None:
-        """end date."""
+        """End Date (UTC), or None if the interval is open or unset.
+
+        For a single datetime query this equals :attr:`start_date`, so
+        backends can always filter with a closed ``start <= t <= end``
+        interval intersection instead of special-casing instants.
+        """
         return self._end_date
+
+    @property
+    def datetime_interval(self) -> DateTimeInterval | None:
+        """The query window as a normalized ``(start, end)`` UTC interval.
+
+        A single datetime is returned as ``(t, t)`` and open interval ends as
+        ``None``, following the shared temporal contract in
+        :mod:`stac_fastapi.types.temporal`. Returns ``None`` when no datetime
+        was given.
+        """
+        if self.datetime is None:
+            return None
+        return (self._start_date, self._end_date)
 
     @field_validator("bbox")
     @classmethod
@@ -117,45 +136,27 @@ Either a date-time or an interval, open or closed. Date and time expressions adh
     @field_validator("datetime", mode="after")
     @classmethod
     def validate_datetime(cls, value: str | None, info: ValidationInfo) -> str | None:
-        """validate datetime."""
-        # Split on "/" and replace no value or ".." with None
+        """Validate datetime with the shared temporal contract.
+
+        Uses the same parser as Item Search (GET and POST) and Collection
+        Search (GET) so every endpoint applies identical interval semantics,
+        UTC normalization, and open-end rules.
+        """
         if value is None:
             return value
-        values = [v if v and v != ".." else None for v in value.split("/")]
 
-        # If there are more than 2 dates, it's invalid
-        if len(values) > 2:
-            raise ValueError(
-                """Invalid datetime range. Too many values. """
-                """Must match format: {begin_date}/{end_date}"""
-            )
+        try:
+            interval = parse_datetime_interval(value)
+        except HTTPException as e:
+            # Match the pydantic validation error behavior (422) of the other
+            # POST request models instead of propagating a 400 HTTPException.
+            raise ValueError(e.detail) from e
 
-        # If there is only one date, duplicate to use for both start and end dates
-        if len(values) == 1:
-            values = [values[0], values[0]]
-
-        # Cast because pylance gets confused by the type adapter and annotated type
-        dates = cast(
-            list[dt | None],
-            [
-                # Use the type adapter to validate the datetime strings,
-                # strict is necessary due to pydantic issues #8736 and #8762
-                SearchDatetime.validate_strings(v, strict=True) if v else None
-                for v in values
-            ],
-        )
-
-        # If there is a start and end date,
-        # check that the start date is before the end date
-        if dates[0] and dates[1] and dates[0] > dates[1]:
-            raise ValueError(
-                "Invalid datetime range. Begin date after end date. "
-                "Must match format: {begin_date}/{end_date}"
-            )
-
-        # Store the parsed dates
-        info.data["_start_date"] = dates[0]
-        info.data["_end_date"] = dates[1]
+        # Store the parsed dates; a single datetime is stored for both bounds
+        # and open interval ends are stored as None.
+        assert interval is not None
+        info.data["_start_date"] = interval[0]
+        info.data["_end_date"] = interval[1]
 
         # Return the original string value
         return value

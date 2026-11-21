@@ -47,7 +47,15 @@ class BaseAggregationClient(abc.ABC):
     def aggregate(
         self, collection_id: str | None = None, **kwargs
     ) -> AggregationCollection:
-        """Return the aggregation buckets for a given search result"""
+        """Return the aggregation buckets for a given search result.
+
+        The ``datetime`` search parameter arrives as the raw RFC 3339 datetime
+        or interval string. Normalize it with
+        ``stac_fastapi.types.temporal.parse_datetime_interval`` and match
+        Items with ``stac_fastapi.types.temporal.item_matches_interval`` so
+        aggregations apply the same interval-intersection contract as Item
+        Search and Collection Search.
+        """
         return AggregationCollection(
             type="AggregationCollection",
             aggregations=[],
@@ -107,11 +115,19 @@ class AsyncBaseAggregationClient(abc.ABC):
         ids: list[str] | None = None,
         bbox: BBox | None = None,
         intersects: Geometry | None = None,
-        datetime: DateTimeType | None = None,
+        datetime: str | DateTimeType | None = None,
         limit: int | None = 10,
         **kwargs,
     ) -> AggregationCollection:
-        """Return the aggregation buckets for a given search result"""
+        """Return the aggregation buckets for a given search result.
+
+        The ``datetime`` search parameter arrives as the raw RFC 3339 datetime
+        or interval string. Normalize it with
+        ``stac_fastapi.types.temporal.parse_datetime_interval`` and match
+        Items with ``stac_fastapi.types.temporal.item_matches_interval`` so
+        aggregations apply the same interval-intersection contract as Item
+        Search and Collection Search.
+        """
         return AggregationCollection(
             type="AggregationCollection",
             aggregations=[],

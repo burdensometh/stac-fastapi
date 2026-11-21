@@ -11,6 +11,11 @@ from stac_pydantic.api import Search
 from stac_pydantic.shared import BBox
 
 from stac_fastapi.types.rfc3339 import DateTimeType, str_to_interval
+from stac_fastapi.types.temporal import (
+    DateTimeInterval,
+    normalize_to_utc,
+    parse_datetime_interval,
+)
 
 
 def crop(v: PositiveInt) -> PositiveInt:
@@ -147,22 +152,32 @@ class DatetimeMixin:
         return str_to_interval(self.datetime)
 
     @property
-    def start_date(self) -> dt | None:
-        """Start Date."""
-        parsed = self.parse_datetime()
-        if parsed is None:
-            return None
+    def datetime_interval(self) -> DateTimeInterval | None:
+        """The query window as a normalized ``(start, end)`` UTC interval.
 
-        return parsed[0] if isinstance(parsed, tuple) else parsed
+        A single datetime is returned as ``(t, t)`` and open interval ends as
+        ``None``, following the shared temporal contract in
+        :mod:`stac_fastapi.types.temporal`. Returns ``None`` when no datetime
+        was given.
+        """
+        return parse_datetime_interval(self.datetime)
+
+    @property
+    def start_date(self) -> dt | None:
+        """Start Date (UTC), or None if the interval is open or unset."""
+        interval = self.datetime_interval
+        return interval[0] if interval else None
 
     @property
     def end_date(self) -> dt | None:
-        """End Date."""
-        parsed = self.parse_datetime()
-        if parsed is None:
-            return None
+        """End Date (UTC), or None if the interval is open or unset.
 
-        return parsed[1] if isinstance(parsed, tuple) else None
+        For a single datetime query this equals :attr:`start_date`, so
+        backends can always filter with a closed ``start <= t <= end``
+        interval intersection instead of special-casing instants.
+        """
+        interval = self.datetime_interval
+        return interval[1] if interval else None
 
 
 @attr.s
@@ -234,3 +249,33 @@ class BaseSearchPostRequest(Search):
         10,
         description="Limits the number of results that are included in each page of the response (capped to 10_000).",  # noqa: E501
     )
+
+    @property
+    def datetime_interval(self) -> DateTimeInterval | None:
+        """The query window as a normalized ``(start, end)`` UTC interval.
+
+        A single datetime is returned as ``(t, t)`` and open interval ends as
+        ``None``, following the shared temporal contract in
+        :mod:`stac_fastapi.types.temporal`. Returns ``None`` when no datetime
+        was given.
+        """
+        if self.datetime is None:
+            return None
+        return (self.start_date, self.end_date)
+
+    @property
+    def start_date(self) -> dt | None:
+        """Start Date (UTC), or None if the interval is open or unset."""
+        start = super().start_date
+        return normalize_to_utc(start) if start is not None else None
+
+    @property
+    def end_date(self) -> dt | None:
+        """End Date (UTC), or None if the interval is open or unset.
+
+        For a single datetime query this equals :attr:`start_date`, so
+        backends can always filter with a closed ``start <= t <= end``
+        interval intersection instead of special-casing instants.
+        """
+        end = super().end_date
+        return normalize_to_utc(end) if end is not None else None

@@ -89,6 +89,7 @@ nav:
           - requests: api/stac_fastapi/types/requests.md
           - rfc3339: api/stac_fastapi/types/rfc3339.md
           - search: api/stac_fastapi/types/search.md
+          - temporal: api/stac_fastapi/types/temporal.md
           - stac: api/stac_fastapi/types/stac.md
   - Migration Guides:
     - v2.5 -> v3.0: migrations/v3.0.0.md

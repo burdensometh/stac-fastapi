@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Shared temporal contract in `stac_fastapi.types.temporal` for Item Search, Collection Search, and the Aggregation extension. It normalizes the `datetime` query parameter to a `(start, end)` UTC interval (a single datetime becomes a closed point interval `(t, t)`; `..` ends stay open), reads an Item's temporal extent from `datetime` or `start_datetime`/`end_datetime`, and matches by closed-interval intersection, so instant captures and multi-day observations are queried uniformly and the same instant written with different UTC offsets gives the same results. All request models now expose the normalized interval via a `datetime_interval` property, and `filter_items_by_datetime` / `item_matches_interval` / `collection_matches_interval` give backends a reference implementation for queries and aggregations.
+
+### Fixed
+
+- `DatetimeMixin.end_date` (GET search/items/collections request models) now returns the query datetime for a single-datetime query instead of `None`, so backends no longer treat an instant query as an open-ended range. `start_date`/`end_date` are now also normalized to UTC and identical between GET and POST request models.
+- Collection-Search POST requests now parse `datetime` with the same rules as every other endpoint, rejecting double-open intervals (`..`) instead of accepting them.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed
