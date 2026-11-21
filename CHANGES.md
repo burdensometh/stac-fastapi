@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an explicit, backend-neutral multi-key sort contract (`stac_fastapi.extensions.sort.SortContract`) to the Sort extension. The contract resolves each key's comparable type, ascending/descending direction, and missing-value (`NULL`) position from the Sortables JSON Schema definitions, then appends `collection`/`id` as a stable tiebreak tail so paginated ordering is deterministic across backends. GET (`+field`/`-field`) and POST (`field`/`direction`) requests parse to equal contracts via `SortExtensionGetRequest.to_sort_contract`, `SortExtensionPostRequest.to_sort_contract`, or the transport-agnostic `sort_contract_from_request` helper. Incomparable declared types and runtime values raise explicit errors (`AmbiguousSortableTypeError`, `IncomparableSortValueError`); an in-memory reference implementation (`sort_items`) is provided for tests and in-memory backends. Backends must translate the full contract into the data store's ordering clause before pagination rather than re-sorting a fetched page.
+
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed

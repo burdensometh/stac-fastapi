@@ -75,6 +75,7 @@ nav:
               - request: api/stac_fastapi/extensions/query/request.md
           - sort:
               - module: api/stac_fastapi/extensions/sort/index.md
+              - contract: api/stac_fastapi/extensions/sort/contract.md
               - request: api/stac_fastapi/extensions/sort/request.md
               - sort: api/stac_fastapi/extensions/sort/sort.md
           - transaction: api/stac_fastapi/extensions/transaction.md
