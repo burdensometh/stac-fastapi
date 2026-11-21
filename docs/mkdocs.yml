@@ -46,6 +46,7 @@ nav:
           - bulk_transactions:
             - module: api/stac_fastapi/extensions/bulk_transactions/index.md
             - bulk_transactions: api/stac_fastapi/extensions/bulk_transactions/bulk_transactions.md
+            - streaming: api/stac_fastapi/extensions/bulk_transactions/streaming.md
           - collection_search:
             - module: api/stac_fastapi/extensions/collection_search/index.md
             - collection_search: api/stac_fastapi/extensions/collection_search/collection_search.md

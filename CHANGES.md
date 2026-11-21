@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a streaming bulk items endpoint, `POST /collections/{collection_id}/bulk_items/stream`, to the Bulk Transaction extension. It consumes newline-delimited JSON (`application/x-ndjson`, one STAC Item per line) and commits items through the bulk transactions client in small batches as the request body arrives, so large imports no longer need to be materialized as a single JSON document. Items are validated against the path collection and for a valid `id`; truncated lines, overlong lines and invalid items are reported with their source line number, already-committed batches remain visible in the result, and uncommitted items never count towards `success`. The endpoint is enabled by default and can be turned off with `BulkTransactionExtension(enable_streaming=False)`; the batch size (`stream_chunk_size`), the number of uncommitted batches in flight (`stream_max_in_flight`), the maximum line length (`stream_max_line_bytes`) and the number of collected errors (`stream_max_errors`) are configurable, with the read buffer and in-flight batches strictly bounded. The underlying `BulkStreamIngester` and `parse_ndjson_stream` are exported from `stac_fastapi.extensions.bulk_transactions` for direct use.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed
