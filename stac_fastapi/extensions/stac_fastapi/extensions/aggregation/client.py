@@ -1,11 +1,16 @@
 """Aggregation extensions clients."""
 
 import abc
+from collections.abc import Awaitable, Callable
 
 import attr
 from geojson_pydantic.geometries import Geometry
 from stac_pydantic.shared import BBox
 
+from stac_fastapi.types.bbox import (
+    execute_aggregation_query,
+    execute_aggregation_query_async,
+)
 from stac_fastapi.types.rfc3339 import DateTimeType
 
 from .types import Aggregation, AggregationCollection
@@ -64,6 +69,19 @@ class BaseAggregationClient(abc.ABC):
                 },
             ],
         )
+
+    def aggregate_with_bbox(
+        self,
+        bbox: BBox | None,
+        execute: Callable[[BBox], AggregationCollection],
+    ) -> AggregationCollection:
+        """Plan and run an aggregation for a possibly antimeridian-crossing bbox.
+
+        ``execute`` is called once per rectangular query window with a bbox
+        that never crosses the antimeridian; per-window buckets are merged by
+        aggregation and bucket identity, summing their frequencies.
+        """
+        return execute_aggregation_query(bbox, execute)
 
 
 @attr.s
@@ -128,3 +146,11 @@ class AsyncBaseAggregationClient(abc.ABC):
                 },
             ],
         )
+
+    async def aggregate_with_bbox(
+        self,
+        bbox: BBox | None,
+        execute: Callable[[BBox], Awaitable[AggregationCollection]],
+    ) -> AggregationCollection:
+        """Async counterpart of :meth:`BaseAggregationClient.aggregate_with_bbox`."""
+        return await execute_aggregation_query_async(bbox, execute)

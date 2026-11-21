@@ -8,12 +8,14 @@ from fastapi import Query
 from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator
 from stac_pydantic.shared import BBox, SearchDatetime
 
+from stac_fastapi.types.bbox import validate_bbox
 from stac_fastapi.types.search import (
     APIRequest,
     DatetimeMixin,
     DateTimeQueryType,
     Limit,
     _bbox_converter,
+    _validate_bbox_attribute,
     _validate_datetime,
 )
 
@@ -22,7 +24,11 @@ from stac_fastapi.types.search import (
 class BaseCollectionSearchGetRequest(APIRequest, DatetimeMixin):
     """Basics additional Collection-Search parameters for the GET request."""
 
-    bbox: BBox | None = attr.ib(default=None, converter=_bbox_converter)  # type: ignore
+    bbox: BBox | None = attr.ib(  # type: ignore
+        default=None,
+        converter=_bbox_converter,
+        validator=_validate_bbox_attribute,
+    )
     datetime: DateTimeQueryType = attr.ib(default=None, validator=_validate_datetime)
     limit: Annotated[
         Limit | None,
@@ -89,30 +95,12 @@ Either a date-time or an interval, open or closed. Date and time expressions adh
 
     @field_validator("bbox")
     @classmethod
-    def validate_bbox(cls, v: BBox) -> BBox:
-        """validate bbox."""
-        if v:
-            # Validate order
-            if len(v) == 4:
-                xmin, ymin, xmax, ymax = cast(tuple[int, int, int, int], v)
-            else:
-                xmin, ymin, min_elev, xmax, ymax, max_elev = cast(
-                    tuple[int, int, int, int, int, int], v
-                )
-                if max_elev < min_elev:
-                    raise ValueError(
-                        "Maximum elevation must greater than minimum elevation"
-                    )
-            # Validate against WGS84
-            if xmin < -180 or ymin < -90 or xmax > 180 or ymax > 90:
-                raise ValueError("Bounding box must be within (-180, -90, 180, 90)")
-
-            if ymax < ymin:
-                raise ValueError(
-                    "Maximum longitude must be greater than minimum longitude"
-                )
-
-        return v
+    def validate_bbox(cls, v: BBox | None) -> BBox | None:
+        """Validate the bbox, allowing antimeridian-crossing longitude order."""
+        # A reversed longitude order (xmin > xmax) is legal and denotes a
+        # bbox that crosses the antimeridian; it is handled when building the
+        # query plan, so validate_bbox deliberately does not reject it.
+        return validate_bbox(v)
 
     @field_validator("datetime", mode="after")
     @classmethod

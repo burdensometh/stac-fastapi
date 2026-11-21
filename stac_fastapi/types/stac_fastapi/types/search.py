@@ -5,12 +5,14 @@ from typing import Annotated, cast
 
 import attr
 from fastapi import HTTPException, Query
-from pydantic import Field, PositiveInt
+from pydantic import Field, PositiveInt, field_validator
 from pydantic.functional_validators import AfterValidator
 from stac_pydantic.api import Search
 from stac_pydantic.shared import BBox
 
 from stac_fastapi.types.rfc3339 import DateTimeType, str_to_interval
+
+from .bbox import validate_bbox
 
 
 def crop(v: PositiveInt) -> PositiveInt:
@@ -42,9 +44,25 @@ def str2bbox(x: str) -> BBox | None:
                 status_code=400, detail=f"BBox '{x}' must have 4 or 6 values."
             )
 
+        try:
+            validate_bbox(cast(BBox, t))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         return cast(BBox, t)
 
     return None
+
+
+def _validate_bbox_attribute(
+    instance: object, attribute: attr.Attribute, value: BBox | None
+) -> None:
+    """Attrs validator enforcing bbox validity on GET-style request models."""
+    if value is not None:
+        try:
+            validate_bbox(value)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
 
 def _collection_converter(
@@ -171,7 +189,11 @@ class BaseSearchGetRequest(APIRequest, DatetimeMixin):
 
     collections: list[str] | None = attr.ib(default=None, converter=_collection_converter)
     ids: list[str] | None = attr.ib(default=None, converter=_ids_converter)
-    bbox: BBox | None = attr.ib(default=None, converter=_bbox_converter)
+    bbox: BBox | None = attr.ib(
+        default=None,
+        converter=_bbox_converter,
+        validator=_validate_bbox_attribute,
+    )
     intersects: Annotated[
         str | None,
         Query(
@@ -234,3 +256,9 @@ class BaseSearchPostRequest(Search):
         10,
         description="Limits the number of results that are included in each page of the response (capped to 10_000).",  # noqa: E501
     )
+
+    @field_validator("bbox")
+    @classmethod
+    def validate_bbox_field(cls, v: BBox | None) -> BBox | None:
+        """Validate the bbox, allowing antimeridian-crossing longitude order."""
+        return validate_bbox(v)

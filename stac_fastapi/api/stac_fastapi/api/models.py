@@ -17,6 +17,7 @@ from stac_fastapi.types.search import (
     DateTimeQueryType,
     Limit,
     _bbox_converter,
+    _validate_bbox_attribute,
     _validate_datetime,
 )
 
@@ -119,7 +120,11 @@ class ItemCollectionUri(APIRequest, DatetimeMixin):
             description="Limits the number of results that are included in each page of the response (capped to 10_000)."  # noqa: E501
         ),
     ] = attr.ib(default=10)
-    bbox: BBox | None = attr.ib(default=None, converter=_bbox_converter)  # type: ignore [misc]
+    bbox: BBox | None = attr.ib(  # type: ignore [misc]
+        default=None,
+        converter=_bbox_converter,
+        validator=_validate_bbox_attribute,
+    )
     datetime: DateTimeQueryType = attr.ib(default=None, validator=_validate_datetime)
 
 

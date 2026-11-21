@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Antimeridian-aware bbox handling for Item Search and Collection Search. A bbox whose west longitude is greater than its east longitude (e.g. `170,-10,-170,10`) is now interpreted as a narrow extent crossing the 180th meridian rather than an empty result. It is split into two ordinary rectangular query windows, one on each side of the antimeridian; per-window matches are deduplicated by Item (`collection` + `id`) or Collection (`id`) identity before the limit is applied. Both four- and six-value bboxes are supported, elevation and latitude rules are unchanged, and invalid latitudes/longitudes/elevations are rejected with `400` (GET) or the framework's validation error (POST). `numberMatched`, `numberReturned`, pagination counts and aggregation buckets are computed from the real geographic extent. Reusable planning/orchestration helpers are provided on the core, collection-search and aggregation clients.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed

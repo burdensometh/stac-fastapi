@@ -1,6 +1,7 @@
 """Base clients."""
 
 import abc
+from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urljoin, urlsplit
 
@@ -12,6 +13,12 @@ from stac_pydantic.shared import BBox, MimeTypes
 from stac_pydantic.version import STAC_VERSION
 
 from . import stac
+from .bbox import (
+    COLLECTION_IDENTITY_KEYS,
+    ITEM_IDENTITY_KEYS,
+    execute_bbox_query,
+    execute_bbox_query_async,
+)
 from .config import ApiSettings
 from .conformance import BASE_CONFORMANCE_CLASSES
 from .extension import ApiExtension
@@ -138,6 +145,50 @@ class BaseCoreClient(LandingPageMixin, abc.ABC):
             base_conformance.extend(extension_classes)
 
         return base_conformance
+
+    def search_items_with_bbox(
+        self,
+        bbox: BBox | None,
+        execute: Callable[[BBox], stac.ItemCollection],
+        *,
+        limit: int | None = None,
+    ) -> stac.ItemCollection:
+        """Plan and run an Item search for a possibly antimeridian-crossing bbox.
+
+        An antimeridian-crossing bbox is split into two ordinary query
+        windows. ``execute`` is called once per window with a bbox that never
+        crosses the antimeridian; the per-window results are deduplicated by
+        Item identity (``collection`` + ``id``) before the limit is applied.
+        Ordinary (non-crossing) bboxes produce a single call and are returned
+        essentially unchanged.
+        """
+        return execute_bbox_query(
+            bbox,
+            execute,
+            result_key="features",
+            identity_keys=ITEM_IDENTITY_KEYS,
+            limit=limit,
+        )
+
+    def search_collections_with_bbox(
+        self,
+        bbox: BBox | None,
+        execute: Callable[[BBox], stac.Collections],
+        *,
+        limit: int | None = None,
+    ) -> stac.Collections:
+        """Plan and run a Collection search for a possibly crossing bbox.
+
+        Per-window results are deduplicated by Collection identity (``id``)
+        before the limit is applied.
+        """
+        return execute_bbox_query(
+            bbox,
+            execute,
+            result_key="collections",
+            identity_keys=COLLECTION_IDENTITY_KEYS,
+            limit=limit,
+        )
 
     def landing_page(self, **kwargs) -> stac.LandingPage:
         """Landing page.
@@ -350,6 +401,38 @@ class AsyncBaseCoreClient(LandingPageMixin, abc.ABC):
     def extension_is_enabled(self, extension: str) -> bool:
         """Check if an api extension is enabled."""
         return any([type(ext).__name__ == extension for ext in self.extensions])
+
+    async def search_items_with_bbox(
+        self,
+        bbox: BBox | None,
+        execute: Callable[[BBox], Awaitable[stac.ItemCollection]],
+        *,
+        limit: int | None = None,
+    ) -> stac.ItemCollection:
+        """Async counterpart of :meth:`BaseCoreClient.search_items_with_bbox`."""
+        return await execute_bbox_query_async(
+            bbox,
+            execute,
+            result_key="features",
+            identity_keys=ITEM_IDENTITY_KEYS,
+            limit=limit,
+        )
+
+    async def search_collections_with_bbox(
+        self,
+        bbox: BBox | None,
+        execute: Callable[[BBox], Awaitable[stac.Collections]],
+        *,
+        limit: int | None = None,
+    ) -> stac.Collections:
+        """Async counterpart of :meth:`BaseCoreClient.search_collections_with_bbox`."""
+        return await execute_bbox_query_async(
+            bbox,
+            execute,
+            result_key="collections",
+            identity_keys=COLLECTION_IDENTITY_KEYS,
+            limit=limit,
+        )
 
     async def landing_page(self, **kwargs) -> stac.LandingPage:
         """Landing page.
