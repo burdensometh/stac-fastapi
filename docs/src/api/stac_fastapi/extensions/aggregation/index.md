@@ -6,5 +6,6 @@ Aggregation Extensions submodule.
 
 * [stac_fastapi.extensions.aggregation.aggregation](aggregation.md)
 * [stac_fastapi.extensions.aggregation.client](client.md)
+* [stac_fastapi.extensions.aggregation.merge](merge.md)
 * [stac_fastapi.extensions.aggregation.request](request.md)
 * [stac_fastapi.extensions.aggregation.types](types.md)

@@ -41,6 +41,7 @@ nav:
             - module: api/stac_fastapi/extensions/aggregation/index.md
             - aggregation: api/stac_fastapi/extensions/aggregation/aggregation.md
             - client: api/stac_fastapi/extensions/aggregation/client.md
+            - merge: api/stac_fastapi/extensions/aggregation/merge.md
             - request: api/stac_fastapi/extensions/aggregation/request.md
             - types: api/stac_fastapi/extensions/aggregation/types.md
           - bulk_transactions:

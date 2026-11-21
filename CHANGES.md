@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an aggregation merge contract (`stac_fastapi.extensions.aggregation.merge`) for aggregation requests fanned out across backend shards. Each shard reports `count`/`sum`/`missing` partials for the same query population (collection filtering keeps going through the existing `AggregationExtension` request models), and `merge_partials` combines them into a correctly sample-weighted global average and coverage. Shards with no matches report zero samples (`ShardPartial.empty`), failed shards are reported as `ShardFailure` and never merged as empty shards, and statistics that cannot be merged from these partials (e.g. median, percentiles, cardinality) are rejected with `NonMergeableStatisticError`.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed
