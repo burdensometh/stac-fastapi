@@ -454,6 +454,14 @@ class StacApi:
         self.client.title = self.title
         self.client.description = self.description
 
+        # Give extensions which need it (e.g. `TokenPaginationExtension` with a
+        # snapshot backend) the opportunity to wrap the client before routes are
+        # registered, so the endpoints pick up the wrapped methods.
+        for ext in self.extensions:
+            bind_client = getattr(ext, "bind_client", None)
+            if callable(bind_client):
+                self.client = bind_client(self.client)
+
         Settings.set(self.settings)
         self.app.state.settings = self.settings
 

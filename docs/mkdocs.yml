@@ -69,6 +69,8 @@ nav:
               - offset_pagination: api/stac_fastapi/extensions/pagination/offset_pagination.md
               - token_pagination: api/stac_fastapi/extensions/pagination/token_pagination.md
               - request: api/stac_fastapi/extensions/pagination/request.md
+              - snapshot: api/stac_fastapi/extensions/pagination/snapshot.md
+              - snapshot_client: api/stac_fastapi/extensions/pagination/snapshot_client.md
           - query:
               - module: api/stac_fastapi/extensions/query/index.md
               - query: api/stac_fastapi/extensions/query/query.md

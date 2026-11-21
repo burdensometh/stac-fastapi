@@ -12,8 +12,17 @@ from .filter import (
 )
 from .free_text import FreeTextAdvancedExtension, FreeTextExtension
 from .pagination import (
+    InMemorySnapshotBackend,
+    InvalidPaginationToken,
+    MemorySnapshotBackend,
     OffsetPaginationExtension,
+    PaginationCriteriaMismatch,
     PaginationExtension,
+    ResultSetTooLarge,
+    Snapshot,
+    SnapshotBackend,
+    SnapshotExpired,
+    SnapshotStore,
     TokenPaginationExtension,
 )
 from .query import QueryExtension
@@ -27,9 +36,18 @@ __all__ = (
     "FilterExtension",
     "FreeTextExtension",
     "FreeTextAdvancedExtension",
+    "InMemorySnapshotBackend",
+    "InvalidPaginationToken",
+    "MemorySnapshotBackend",
     "OffsetPaginationExtension",
+    "PaginationCriteriaMismatch",
     "PaginationExtension",
     "QueryExtension",
+    "ResultSetTooLarge",
+    "Snapshot",
+    "SnapshotBackend",
+    "SnapshotExpired",
+    "SnapshotStore",
     "SortExtension",
     "TokenPaginationExtension",
     "TransactionExtension",

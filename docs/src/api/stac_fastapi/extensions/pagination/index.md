@@ -8,3 +8,5 @@ Pagination Extensions submodule.
 * [stac_fastapi.extensions.pagination.offset_pagination](offset_pagination.md)
 * [stac_fastapi.extensions.pagination.token_pagination](token_pagination.md)
 * [stac_fastapi.extensions.pagination.request](request.md)
+* [stac_fastapi.extensions.pagination.snapshot](snapshot.md)
+* [stac_fastapi.extensions.pagination.snapshot_client](snapshot_client.md)

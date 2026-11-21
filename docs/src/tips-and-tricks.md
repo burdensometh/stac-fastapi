@@ -10,6 +10,56 @@ Starting with stac-fastapi `5.2.0`, we've added `ENABLE_DIRECT_RESPONSE` option 
 
 Ref: https://github.com/stac-utils/stac-fastapi-elasticsearch-opensearch/issues/347
 
+## Consistent (snapshot) token pagination
+
+By default, `TokenPaginationExtension` forwards the `token` query parameter (or JSON
+member) to the backend client untouched. When items are inserted or deleted between two
+page requests, classic offset/keyset pagination can therefore show duplicates or skip
+rows.
+
+Passing a snapshot backend makes pagination *consistent*: the first request materializes
+the complete result set and stores it, and every following `next` link browses that
+immutable version.
+
+```python
+from stac_fastapi.extensions import (
+    InMemorySnapshotBackend,
+    TokenPaginationExtension,
+)
+
+pagination = TokenPaginationExtension(
+    snapshot_backend=InMemorySnapshotBackend(max_snapshots=1024),
+)
+```
+
+The pagination token binds the snapshot identifier together with a fingerprint of the
+search parameters which define the result set (`collections`, `ids`, `bbox`,
+`intersects`, `datetime`, `filter`, `query`, `sortby`, ...):
+
+* following the `next` links returns every matching item of the first request exactly
+  once, regardless of concurrent inserts or deletes;
+* reusing a token with different parameters (another filter or another collection
+  selection) is rejected with `400 Bad Request`;
+* when a snapshot is no longer available (evicted or expired, see `snapshot_ttl`), the
+  API responds with `410 Gone` and asks the client to re-run the search;
+* `GET /search` and `POST /search` (and `/collections/{collection_id}/items`) accept the
+  same token, so a result set can be continued with either verb as long as the search
+  conditions are equivalent.
+
+Other knobs:
+
+* `snapshot_secret`: sign tokens with HMAC so they cannot be forged.
+* `snapshot_ttl`: lifetime of a snapshot in seconds (default: no expiry).
+* `snapshot_max_items`: refuse to materialize result sets larger than this value
+  (`413 Content Too Large`).
+
+Tokens issued by the backend which are not recognized as snapshot tokens are still
+forwarded to the client, so existing clients keep working. A custom backend only needs
+to implement `save(snapshot)` and `load(snapshot_id)` (see `SnapshotBackend`); a Redis or
+database backed implementation can be plugged in the same way. Note that the first page
+of a search reads the whole result set, which is best suited to bounded searches or to
+backends able to stream results efficiently.
+
 ## Application Middlewares
 
 By default the `StacApi` class will enable 3 Middlewares (`BrotliMiddleware`, `CORSMiddleware` and `ProxyHeaderMiddleware`). You may want to overwrite the defaults configuration by editing your backend's `app.py`:

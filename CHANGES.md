@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `TokenPaginationExtension` accepts an optional snapshot backend (`snapshot_backend=`) to serve *consistent* pagination: the first page materializes the result set, and pagination tokens continue to browse that immutable version. Tokens bind the snapshot version and a fingerprint of the search parameters, so following `next` links never duplicates or skips rows when items are inserted or deleted concurrently. Tokens issued for different filters/collections are rejected with `400`, expired snapshots respond with `410 Gone` asking the client to re-run the search, and `GET`/`POST` requests with equivalent conditions can continue the same result set. `InMemorySnapshotBackend` is provided, and custom backends only need `save`/`load`.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed
