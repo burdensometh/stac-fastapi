@@ -5,16 +5,22 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi import Depends, HTTPException, Response, security, status
+from pydantic import ValidationError
 from starlette.testclient import TestClient
 
 from stac_fastapi.api.app import StacApi
 from stac_fastapi.extensions.bulk_transactions import (
     AsyncBaseBulkTransactionsClient,
+    AsyncBaseIdempotentBulkTransactionsClient,
     BaseBulkTransactionsClient,
+    BaseIdempotentBulkTransactionsClient,
+    BulkImportReceipt,
+    BulkImportReceiptExistsError,
     BulkTransaction,
     BulkTransactionExtension,
     BulkTransactionMethod,
     Items,
+    bulk_import_fingerprint,
 )
 from stac_fastapi.types.config import ApiSettings
 from stac_fastapi.types.core import BaseCoreClient
@@ -310,3 +316,341 @@ def must_be_bob(
         detail="You're not Bob",
         headers={"WWW-Authenticate": "Basic"},
     )
+
+
+# --- IDEMPOTENT IMPORT TESTS ---
+
+
+def test_items_model_request_id_optional() -> None:
+    """Test that request_id defaults to None and rejects empty values."""
+    bulk_items = Items(items={"id1": {"type": "Feature", "id": "id1"}})
+    assert bulk_items.request_id is None
+
+    bulk_items = Items(
+        items={"id1": {"type": "Feature", "id": "id1"}}, request_id="import-1"
+    )
+    assert bulk_items.request_id == "import-1"
+
+    with pytest.raises(ValidationError):
+        Items(items={"id1": {"type": "Feature", "id": "id1"}}, request_id="")
+
+
+def test_bulk_import_fingerprint_identifies_import() -> None:
+    """Test the fingerprint covers collection, method and actual content."""
+    items = {
+        "id1": {"type": "Feature", "id": "id1", "properties": {"a": 1, "b": 2}},
+        "id2": {"type": "Feature", "id": "id2"},
+    }
+    fingerprint = bulk_import_fingerprint("a-collection", "insert", items)
+
+    # JSON object key order does not matter, at any nesting level
+    reordered = {
+        "id2": {"type": "Feature", "id": "id2"},
+        "id1": {"id": "id1", "type": "Feature", "properties": {"b": 2, "a": 1}},
+    }
+    assert bulk_import_fingerprint("a-collection", "insert", reordered) == fingerprint
+
+    # the collection, the write method and the actual content all identify
+    # the import
+    assert (
+        bulk_import_fingerprint("other-collection", "insert", items) != fingerprint
+    )
+    assert bulk_import_fingerprint("a-collection", "upsert", items) != fingerprint
+    assert (
+        bulk_import_fingerprint(
+            "a-collection",
+            "insert",
+            {"id1": {"type": "Feature", "id": "id1", "properties": {"a": 1}}},
+        )
+        != fingerprint
+    )
+
+
+class DummyIdempotentBulkTransactionsClient(AsyncBaseIdempotentBulkTransactionsClient):
+    """In-memory idempotent client simulating an atomic data+receipt backend."""
+
+    def __init__(self) -> None:
+        self.receipts: dict[tuple[str, str], BulkImportReceipt] = {}
+        self.commits = 0
+        # simulate a receipt lookup that ran before a concurrent import
+        # committed
+        self.miss_next_lookup = False
+
+    async def get_bulk_import_receipt(
+        self, collection_id: str, request_id: str, **kwargs
+    ) -> BulkImportReceipt | None:
+        if self.miss_next_lookup:
+            self.miss_next_lookup = False
+            return None
+        return self.receipts.get((collection_id, request_id))
+
+    async def bulk_item_insert(self, items: Items, **kwargs) -> BulkTransaction:
+        collection_id = kwargs["request"].path_params["collection_id"]
+        key = (collection_id, items.request_id)
+        if key in self.receipts:
+            # unique constraint on (collection_id, request_id); the whole
+            # transaction (items + receipt) is rolled back
+            raise BulkImportReceiptExistsError(
+                f"receipt already committed for request {items.request_id!r}"
+            )
+        errors = [
+            {"id": item_id, "msg": "Item already exists"}
+            for item_id, item in items.items.items()
+            if item.get("properties", {}).get("fail")
+        ]
+        result: BulkTransaction = {
+            "received": len(items.items),
+            "success": len(items.items) - len(errors),
+            "skipped": 0,
+            "errors": errors,
+        }
+        self.receipts[key] = {
+            "request_id": items.request_id,
+            "content_hash": kwargs["content_hash"],
+            "result": result,
+        }
+        self.commits += 1
+        return result
+
+
+class DummySyncIdempotentBulkTransactionsClient(BaseIdempotentBulkTransactionsClient):
+    """Synchronous in-memory idempotent client."""
+
+    def __init__(self) -> None:
+        self.receipts: dict[tuple[str, str], BulkImportReceipt] = {}
+        self.commits = 0
+
+    def get_bulk_import_receipt(
+        self, collection_id: str, request_id: str, **kwargs
+    ) -> BulkImportReceipt | None:
+        return self.receipts.get((collection_id, request_id))
+
+    def bulk_item_insert(
+        self, items: Items, chunk_size: int | None = None, **kwargs
+    ) -> BulkTransaction:
+        collection_id = kwargs["request"].path_params["collection_id"]
+        key = (collection_id, items.request_id)
+        if key in self.receipts:
+            raise BulkImportReceiptExistsError(
+                f"receipt already committed for request {items.request_id!r}"
+            )
+        count = len(items.items)
+        result: BulkTransaction = {
+            "received": count,
+            "success": count,
+            "skipped": 0,
+            "errors": [],
+        }
+        self.receipts[key] = {
+            "request_id": items.request_id,
+            "content_hash": kwargs["content_hash"],
+            "result": result,
+        }
+        self.commits += 1
+        return result
+
+
+@pytest.fixture
+def idempotent_client() -> DummyIdempotentBulkTransactionsClient:
+    return DummyIdempotentBulkTransactionsClient()
+
+
+@pytest.fixture
+def client_with_idempotency(
+    core_client: DummyCoreClient,
+    idempotent_client: DummyIdempotentBulkTransactionsClient,
+) -> Iterator[TestClient]:
+    """Fixture with a backend supporting idempotent bulk imports."""
+    settings = ApiSettings()
+    api = StacApi(
+        settings=settings,
+        client=core_client,
+        extensions=[BulkTransactionExtension(client=idempotent_client)],
+    )
+    with TestClient(api.app) as client:
+        yield client
+
+
+def test_bulk_item_insert_with_request_id_replays_committed_result(
+    client_with_idempotency: TestClient,
+    idempotent_client: DummyIdempotentBulkTransactionsClient,
+    item: dict,
+) -> None:
+    """A retry with the same request id gets the stored per-item result."""
+    payload = {
+        "items": {
+            item["id"]: item,
+            "bad_item": {
+                **item,
+                "id": "bad_item",
+                "properties": {"datetime": "2020-06-13T13:00:00Z", "fail": True},
+            },
+        },
+        "method": "upsert",
+        "request_id": "import-1",
+    }
+
+    first = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items", json=payload
+    )
+    assert first.is_success, first.text
+    expected = {
+        "received": 2,
+        "success": 1,
+        "skipped": 0,
+        "errors": [{"id": "bad_item", "msg": "Item already exists"}],
+    }
+    assert first.json() == expected
+
+    # retrying after e.g. a network timeout returns the committed per-item
+    # result and does not import the items again
+    replay = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items", json=payload
+    )
+    assert replay.is_success, replay.text
+    assert replay.json() == expected
+    assert idempotent_client.commits == 1
+
+
+def test_bulk_item_insert_concurrent_request_commits_once(
+    client_with_idempotency: TestClient,
+    idempotent_client: DummyIdempotentBulkTransactionsClient,
+    item: dict,
+) -> None:
+    """Two identical racing requests commit only once.
+
+    The loser of the race fails to record its receipt and instead returns
+    the receipt stored by the winner.
+    """
+    payload = {
+        "items": {item["id"]: item},
+        "method": "insert",
+        "request_id": "import-1",
+    }
+
+    first = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items", json=payload
+    )
+    assert first.is_success, first.text
+
+    # simulate a concurrent request whose receipt lookup ran before the
+    # first import committed
+    idempotent_client.miss_next_lookup = True
+    replay = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items", json=payload
+    )
+    assert replay.is_success, replay.text
+    assert replay.json() == first.json()
+    assert idempotent_client.commits == 1
+
+
+def test_bulk_item_insert_request_id_conflict_on_different_items(
+    client_with_idempotency: TestClient,
+    idempotent_client: DummyIdempotentBulkTransactionsClient,
+    item: dict,
+) -> None:
+    """The same request id with different content is a 409 conflict."""
+    payload = {
+        "items": {item["id"]: item},
+        "method": "insert",
+        "request_id": "import-1",
+    }
+    response = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items", json=payload
+    )
+    assert response.is_success, response.text
+
+    conflicting = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items",
+        json={
+            "items": {"other_item": {**item, "id": "other_item"}},
+            "method": "insert",
+            "request_id": "import-1",
+        },
+    )
+    assert conflicting.status_code == 409
+    assert conflicting.json()["code"] == "ConflictError"
+    assert idempotent_client.commits == 1
+
+
+def test_bulk_item_insert_request_id_conflict_on_different_method(
+    client_with_idempotency: TestClient,
+    idempotent_client: DummyIdempotentBulkTransactionsClient,
+    item: dict,
+) -> None:
+    """The write method is part of the import identity."""
+    payload = {
+        "items": {item["id"]: item},
+        "method": "insert",
+        "request_id": "import-1",
+    }
+    response = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items", json=payload
+    )
+    assert response.is_success, response.text
+
+    conflicting = client_with_idempotency.post(
+        "/collections/a-collection/bulk_items",
+        json={**payload, "method": "upsert"},
+    )
+    assert conflicting.status_code == 409
+    assert idempotent_client.commits == 1
+
+
+def test_bulk_item_insert_request_id_scoped_to_collection(
+    client_with_idempotency: TestClient,
+    idempotent_client: DummyIdempotentBulkTransactionsClient,
+    item: dict,
+) -> None:
+    """The same request id on another collection is an independent import."""
+    payload = {
+        "items": {item["id"]: item},
+        "method": "insert",
+        "request_id": "import-1",
+    }
+    for collection_id in ("a-collection", "another-collection"):
+        response = client_with_idempotency.post(
+            f"/collections/{collection_id}/bulk_items", json=payload
+        )
+        assert response.is_success, response.text
+
+    assert idempotent_client.commits == 2
+
+
+def test_bulk_item_insert_request_id_unsupported_backend(
+    client: TestClient, item: dict
+) -> None:
+    """Backends without idempotent import support reject request ids."""
+    payload = {
+        "items": {item["id"]: item},
+        "method": "insert",
+        "request_id": "import-1",
+    }
+    response = client.post("/collections/a-collection/bulk_items", json=payload)
+    assert response.status_code == 400
+
+
+def test_bulk_item_insert_with_request_id_sync_client(
+    core_client: DummyCoreClient, item: dict
+) -> None:
+    """Synchronous idempotent clients get the same replay behavior."""
+    sync_client = DummySyncIdempotentBulkTransactionsClient()
+    settings = ApiSettings()
+    api = StacApi(
+        settings=settings,
+        client=core_client,
+        extensions=[BulkTransactionExtension(client=sync_client)],
+    )
+    payload = {
+        "items": {item["id"]: item},
+        "method": "insert",
+        "request_id": "import-1",
+    }
+    with TestClient(api.app) as client:
+        first = client.post("/collections/a-collection/bulk_items", json=payload)
+        assert first.is_success, first.text
+        replay = client.post("/collections/a-collection/bulk_items", json=payload)
+        assert replay.is_success, replay.text
+        assert replay.json() == first.json()
+
+    assert sync_client.commits == 1

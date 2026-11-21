@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added optional idempotent bulk imports to the Bulk Transaction extension: `POST /collections/{collection_id}/bulk_items` now accepts an optional `request_id` identifying the import request. Backends implementing `(Async)BaseIdempotentBulkTransactionsClient` commit the items and an import receipt atomically; a retry with the same `request_id` and identical content (collection, write method and items) returns the stored per-item result instead of importing again, identical concurrent requests commit only once, and reusing a `request_id` with different content returns `409 Conflict`. Requests carrying a `request_id` are rejected with `400 Bad Request` on backends without idempotent import support.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed
