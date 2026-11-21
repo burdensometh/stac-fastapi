@@ -73,6 +73,9 @@ nav:
               - module: api/stac_fastapi/extensions/query/index.md
               - query: api/stac_fastapi/extensions/query/query.md
               - request: api/stac_fastapi/extensions/query/request.md
+          - reconciliation:
+              - module: api/stac_fastapi/extensions/reconciliation/index.md
+              - reconciliation: api/stac_fastapi/extensions/reconciliation/reconciliation.md
           - sort:
               - module: api/stac_fastapi/extensions/sort/index.md
               - request: api/stac_fastapi/extensions/sort/request.md

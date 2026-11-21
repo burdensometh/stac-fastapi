@@ -39,3 +39,15 @@ class InvalidQueryParameter(StacApiError):
     """
 
     pass
+
+
+class InvalidSnapshotError(StacApiError):
+    """The declared scope, version, checksum or count of a snapshot is invalid."""
+
+    pass
+
+
+class StaleSnapshotError(ConflictError):
+    """The snapshot is older than data already applied for the collection."""
+
+    pass

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the optional reconciliation import extension (`ReconciliationExtension`, `POST /collections/{collection_id}/reconcile`). It imports a declared snapshot of a collection, compares it against the Items that are actually persisted using each Item's own `id`, and generates add, update and retire actions. A snapshot must declare its `scope` (`complete` or `partial`) and its `version`; only a `complete` snapshot may retire Items, and it must declare its `item_count`. Failed, partial or segmented-but-incomplete input never retires anything, a snapshot older than the last applied version is rejected, and a successful import leaves `/collections/{collection_id}/items` matching the confirmed snapshot. `load_snapshot` reads a snapshot from a directory of JSON files.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed

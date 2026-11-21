@@ -17,6 +17,7 @@ from .pagination import (
     TokenPaginationExtension,
 )
 from .query import QueryExtension
+from .reconciliation import ReconciliationExtension
 from .sort import SortExtension
 from .transaction import TransactionExtension
 
@@ -30,6 +31,7 @@ __all__ = (
     "OffsetPaginationExtension",
     "PaginationExtension",
     "QueryExtension",
+    "ReconciliationExtension",
     "SortExtension",
     "TokenPaginationExtension",
     "TransactionExtension",
