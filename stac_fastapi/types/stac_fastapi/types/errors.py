@@ -39,3 +39,20 @@ class InvalidQueryParameter(StacApiError):
     """
 
     pass
+
+
+class RebaseError(StacApiError):
+    """Error while rebasing hrefs of an imported STAC object."""
+
+    pass
+
+
+class UnknownReferenceError(RebaseError):
+    """The original reference used to resolve relative hrefs cannot be determined.
+
+    Raised when an object contains relative hrefs but has no usable `self` link, or
+    when its `self` links are relative or contradictory. Relative hrefs are never
+    guessed, because a wrong base silently produces broken asset URLs.
+    """
+
+    pass

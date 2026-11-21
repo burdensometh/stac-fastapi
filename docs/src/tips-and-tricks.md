@@ -215,3 +215,49 @@ register_operations({
     ("GET", "/catalogs/{catalog_id}/collections"): "list_collections",
 })
 ```
+
+## Rebasing hrefs when importing Items from a moved catalog
+
+When a catalog moves — for example from an internal web root to object storage —
+the Items that were exported from the old location may still contain relative
+`assets` and catalog `links` hrefs. Those hrefs used to be resolved against the
+old serving address, so after the move they point at the wrong target.
+
+The Transaction and Bulk Transaction extensions accept an opt-in
+`prefix_mappings` argument. When it is set, incoming Items are rebased before
+they are handed to the client:
+
+- relative hrefs are resolved against the Item's original `self` link, then
+  rewritten through the declared prefix mapping;
+- absolute hrefs under a declared prefix are rewritten to the new location;
+- absolute hrefs outside the declared prefixes (external assets) are preserved;
+- importing the same Item again does not apply the prefix twice;
+- an Item whose original reference cannot be determined (no usable absolute
+  `self` link) is rejected with a `400` instead of being guessed.
+
+Because the rewrite happens before storage, the single-item and search read
+paths both return the same, already-absolute target.
+
+```python
+from stac_fastapi.extensions import TransactionExtension
+
+extension = TransactionExtension(
+    client=transactions_client,
+    settings=settings,
+    prefix_mappings={
+        "https://stac.internal/catalog": "s3://catalog-bucket/catalog",
+    },
+)
+```
+
+The same argument is accepted by `BulkTransactionExtension`. The helpers can
+also be used directly, for example in an offline import script:
+
+```python
+from stac_fastapi.types.rebase import rebase_item
+
+stored_item = rebase_item(
+    item,
+    {"https://stac.internal/catalog": "s3://catalog-bucket/catalog"},
+)
+```

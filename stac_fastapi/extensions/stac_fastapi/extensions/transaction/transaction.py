@@ -18,6 +18,7 @@ from stac_fastapi.api.models import CollectionUri, ItemUri, JSONResponse
 from stac_fastapi.api.routes import create_async_endpoint
 from stac_fastapi.types.config import ApiSettings
 from stac_fastapi.types.extension import ApiExtension
+from stac_fastapi.types.rebase import HrefRebaser
 
 from .client import AsyncBaseTransactionsClient, BaseTransactionsClient
 from .request import PartialCollection, PartialItem, PatchOperation
@@ -185,6 +186,11 @@ class TransactionExtension(ApiExtension):
 
     Attributes:
         client: CRUD application logic
+        prefix_mappings:
+            Optional mapping of old href prefix -> new href prefix used when
+            importing Items. When set, incoming Items are rebased against their
+            original `self` link before they reach the client. See
+            :class:`stac_fastapi.types.rebase.HrefRebaser`.
 
     """
 
@@ -200,6 +206,31 @@ class TransactionExtension(ApiExtension):
     router: APIRouter = attr.ib(factory=APIRouter)
     response_class: type[Response] = attr.ib(default=JSONResponse)
     route_dependencies: Sequence[Depends] | None = attr.ib(default=None)
+    prefix_mappings: dict[str, str] | None = attr.ib(default=None)
+
+    def _rebaser(self) -> HrefRebaser | None:
+        """Return the configured importer, or ``None`` when importing is a no-op."""
+        if not self.prefix_mappings:
+            return None
+        return HrefRebaser(prefix_mappings=self.prefix_mappings)
+
+    def _rebase_import_payload(self, item: Item | ItemCollection):
+        """Rebase an incoming Item or ItemCollection before it is stored.
+
+        The rebased hrefs are re-validated into the payload's model type so
+        backends keep receiving the same objects they did before. Objects that
+        are already stored (updates, patches) are never passed through here.
+        """
+        rebaser = self._rebaser()
+        if rebaser is None:
+            return item
+
+        if item.type == "FeatureCollection":
+            return ItemCollection.model_validate(
+                rebaser.rebase_item_collection(item)
+            )
+
+        return Item.model_validate(rebaser.rebase_item(item))
 
     def register_create_item(self):
         """Register create item endpoint (POST /collections/{collection_id}/items)."""
@@ -215,6 +246,7 @@ class TransactionExtension(ApiExtension):
             The Transaction extension requires a `Location` header with the URI
             of the newly created Item for single-Item payloads.
             """
+            request_data.item = self._rebase_import_payload(request_data.item)
             item = await endpoint(request, request_data)
             if request_data.item.type == "Feature":
                 item_id = (

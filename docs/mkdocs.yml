@@ -86,6 +86,7 @@ nav:
           - errors: api/stac_fastapi/types/errors.md
           - extension: api/stac_fastapi/types/extension.md
           - links: api/stac_fastapi/types/links.md
+          - rebase: api/stac_fastapi/types/rebase.md
           - requests: api/stac_fastapi/types/requests.md
           - rfc3339: api/stac_fastapi/types/rfc3339.md
           - search: api/stac_fastapi/types/search.md

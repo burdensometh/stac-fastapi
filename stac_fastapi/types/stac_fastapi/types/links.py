@@ -18,13 +18,25 @@ def filter_links(links: list[dict]) -> list[dict]:
     return [link for link in links if link["rel"] not in INFERRED_LINK_RELS]
 
 
+def is_absolute_href(href: str) -> bool:
+    """Return whether an href is absolute and therefore independent of a base URL.
+
+    Absolute hrefs carry their own scheme (`https://`, `s3://`, `file://`, ...) or
+    are scheme-relative (`//host/path`). They must be preserved verbatim; only
+    hierarchical, scheme-less hrefs are resolved against a base URL.
+    """
+    if not href:
+        return False
+    return href.startswith("//") or bool(urlsplit(href).scheme)
+
+
 def resolve_links(links: list, base_url: str) -> list[dict]:
     """Convert relative links to absolute links while preserving existing absolute URLs.
 
     This function processes links and applies the base_url and proxy path to relative URLs
-    However, it explicitly preserves absolute URLs (starting with http:// or https://) to
-    prevent mangling of external links stored in STAC items (e.g., license URLs, external
-    documentation links).
+    However, it explicitly preserves absolute URLs (any URI scheme, e.g. http://,
+    https://, or s3://) to prevent mangling of external links stored in STAC items
+    (e.g., license URLs, external documentation links, or links into object storage).
     """
     filtered_links = filter_links(links)
     path = urlsplit(base_url).path.rstrip("/")
@@ -32,7 +44,7 @@ def resolve_links(links: list, base_url: str) -> list[dict]:
         href = str(link.get("href", ""))
 
         # Do not mangle URLs that are already absolute
-        if href.startswith(("http://", "https://")):
+        if is_absolute_href(href):
             continue
 
         # Remove leading slash to prevent urljoin from replacing the entire path

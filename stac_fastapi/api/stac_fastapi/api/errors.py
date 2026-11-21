@@ -17,6 +17,7 @@ from stac_fastapi.types.errors import (
     ForeignKeyError,
     InvalidQueryParameter,
     NotFoundError,
+    RebaseError,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ DEFAULT_STATUS_CODES = {
     ForeignKeyError: status.HTTP_424_FAILED_DEPENDENCY,
     DatabaseError: status.HTTP_424_FAILED_DEPENDENCY,
     InvalidQueryParameter: status.HTTP_400_BAD_REQUEST,
+    # An import payload whose hrefs cannot be rebased is a client error.
+    RebaseError: status.HTTP_400_BAD_REQUEST,
     ResponseValidationError: status.HTTP_500_INTERNAL_SERVER_ERROR,
 }
 

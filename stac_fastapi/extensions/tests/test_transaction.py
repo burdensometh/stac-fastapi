@@ -364,3 +364,236 @@ def test_delete_collection(client: TestClient, collection: Collection) -> None:
     response = client.delete("/collections/a-collection")
     assert response.is_success, response.text
     assert response.json()["path_collection_id"] == "a-collection"
+
+
+class RebasingTransactionsClient(DummyTransactionsClient):
+    """Record the payload the client receives so rebasing can be asserted."""
+
+    def __init__(self):
+        self.received: list[Item | ItemCollection] = []
+        self.updated: list[Item] = []
+
+    def create_item(self, item: Item | ItemCollection, *args, **kwargs):
+        self.received.append(item)
+        return item.model_dump(mode="json")
+
+    def update_item(self, collection_id: str, item_id: str, item: Item, **kwargs):
+        self.updated.append(item)
+        return item.model_dump(mode="json")
+
+
+def make_transaction_app(core_client, client, **extension_kwargs):
+    settings = ApiSettings()
+    api = StacApi(
+        settings=settings,
+        client=core_client,
+        extensions=[
+            TransactionExtension(client=client, settings=settings, **extension_kwargs)
+        ],
+    )
+    return TestClient(api.app)
+
+
+@pytest.fixture
+def rebasing_client(core_client: DummyCoreClient):
+    client = RebasingTransactionsClient()
+    api = make_transaction_app(
+        core_client,
+        client,
+        prefix_mappings={"https://stac.internal/catalog": "s3://catalog-bucket/catalog"},
+    )
+    with api as test_client:
+        yield test_client, client
+
+
+def imported_item() -> dict:
+    item = {
+        "type": "Feature",
+        "stac_version": "1.0.0",
+        "stac_extensions": [],
+        "id": "imported_item",
+        "geometry": {"type": "Point", "coordinates": [-105, 40]},
+        "bbox": [-105, 40, -105, 40],
+        "properties": {"datetime": "2020-06-13T13:00:00Z"},
+        "links": [
+            {
+                "rel": "self",
+                "href": "https://stac.internal/catalog/collections/test_collection/items/imported_item",  # noqa: E501
+            }
+        ],
+        "assets": {
+            "visual": {"href": "data/visual.tif"},
+            "external": {"href": "https://elsewhere.example.com/external.tif"},
+        },
+        "collection": "test_collection",
+    }
+    return item
+
+
+def test_create_item_rebases_relative_assets(rebasing_client) -> None:
+    client, transactions_client = rebasing_client
+
+    response = client.post(
+        "/collections/test_collection/items", json=imported_item()
+    )
+    assert response.status_code == 201, response.text
+
+    received = transactions_client.received[-1]
+    assert (
+        received.assets["visual"].href
+        == "s3://catalog-bucket/catalog/collections/test_collection/items/data/visual.tif"
+    )
+    assert (
+        received.assets["external"].href
+        == "https://elsewhere.example.com/external.tif"
+    )
+
+
+def test_create_item_rebasing_is_idempotent(rebasing_client) -> None:
+    client, transactions_client = rebasing_client
+
+    client.post("/collections/test_collection/items", json=imported_item())
+    first = transactions_client.received[-1].assets["visual"].href
+
+    # Re-import the payload the backend would read back; the prefix must not stack.
+    stored = transactions_client.received[-1].model_dump(mode="json")
+    client.post("/collections/test_collection/items", json=stored)
+    second = transactions_client.received[-1].assets["visual"].href
+
+    assert second == first
+
+
+def test_create_item_without_original_reference_is_rejected(rebasing_client) -> None:
+    client, transactions_client = rebasing_client
+
+    item = imported_item()
+    item["links"] = []
+    response = client.post("/collections/test_collection/items", json=item)
+
+    assert response.status_code == 400, response.text
+    assert transactions_client.received == []
+
+
+def test_create_item_collection_rebases_every_feature(rebasing_client) -> None:
+    client, transactions_client = rebasing_client
+
+    response = client.post(
+        "/collections/test_collection/items",
+        json={
+            "type": "FeatureCollection",
+            "features": [imported_item()],
+            "links": [],
+        },
+    )
+    assert response.status_code == 201, response.text
+
+    received = transactions_client.received[-1]
+    assert received.features[0].assets["visual"].href.startswith("s3://catalog-bucket")
+
+
+def test_rebasing_is_opt_in(core_client: DummyCoreClient) -> None:
+    """Without prefix mappings the payload reaches the client untouched."""
+    transactions_client = RebasingTransactionsClient()
+    api = make_transaction_app(core_client, transactions_client)
+
+    with api as client:
+        response = client.post(
+            "/collections/test_collection/items", json=imported_item()
+        )
+
+    assert response.status_code == 201, response.text
+    received = transactions_client.received[-1]
+    assert received.assets["visual"].href == "data/visual.tif"
+    assert received.links[0].href.startswith("https://stac.internal/catalog")
+
+
+def test_update_item_is_not_rebased(rebasing_client) -> None:
+    """Already stored objects are updated verbatim; only imports are rebased."""
+    client, transactions_client = rebasing_client
+
+    item = imported_item()
+    response = client.put("/collections/test_collection/items/imported_item", json=item)
+
+    assert response.is_success, response.text
+    assert transactions_client.received == []
+    assert transactions_client.updated[-1].assets["visual"].href == "data/visual.tif"
+
+
+class InMemoryStore:
+    """Minimal backend that stores rebased Items and serves both read paths."""
+
+    def __init__(self):
+        self.items: dict[str, dict] = {}
+
+
+class StoringTransactionsClient(DummyTransactionsClient):
+    """Store created Items so they can be read back through both read paths."""
+
+    def __init__(self, store: InMemoryStore):
+        self.store = store
+
+    def create_item(self, item, *args, **kwargs):
+        items = item.features if item.type == "FeatureCollection" else [item]
+        for feature in items:
+            self.store.items[feature.id] = feature.model_dump(mode="json")
+        return item.model_dump(mode="json")
+
+
+@pytest.fixture
+def store_client(core_client: DummyCoreClient):
+    store = InMemoryStore()
+    settings = ApiSettings()
+
+    class StoredCoreClient(core_client.__class__):
+        def get_item(self, item_id, collection_id, **kwargs):
+            return store.items[item_id]
+
+        def get_search(self, *args, **kwargs):
+            return {
+                "type": "FeatureCollection",
+                "features": list(store.items.values()),
+                "links": [],
+            }
+
+        def post_search(self, *args, **kwargs):
+            return self.get_search()
+
+    api = StacApi(
+        settings=settings,
+        client=StoredCoreClient(),
+        extensions=[
+            TransactionExtension(
+                client=StoringTransactionsClient(store),
+                settings=settings,
+                prefix_mappings={
+                    "https://stac.internal/catalog": "s3://catalog-bucket/catalog"
+                },
+            )
+        ],
+    )
+    with TestClient(api.app) as test_client:
+        yield test_client
+
+
+def test_item_and_search_read_paths_resolve_to_the_same_target(store_client) -> None:
+    response = store_client.post(
+        "/collections/test_collection/items", json=imported_item()
+    )
+    assert response.status_code == 201, response.text
+
+    item_href = store_client.get(
+        "/collections/test_collection/items/imported_item"
+    ).json()["assets"]["visual"]["href"]
+    get_search_href = store_client.get("/search").json()["features"][0]["assets"][
+        "visual"
+    ]["href"]
+    post_search_href = store_client.post("/search", json={}).json()["features"][0][
+        "assets"
+    ]["visual"]["href"]
+
+    expected = (
+        "s3://catalog-bucket/catalog/collections/test_collection/items/data/visual.tif"
+    )
+    assert item_href == expected
+    assert get_search_href == expected
+    assert post_search_href == expected

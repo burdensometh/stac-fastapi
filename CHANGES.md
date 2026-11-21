@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `prefix_mappings` on `TransactionExtension` and `BulkTransactionExtension` to rebase imported Items whose relative `assets` and catalog `links` hrefs still point at the previous serving location after a move (for example from an internal web root to object storage). Relative hrefs are resolved against the Item's original `self` link and each absolute href under a declared prefix is rewritten to its new location. Absolute hrefs outside the declared prefixes (external assets) are preserved, re-importing is idempotent, and Items whose original reference cannot be determined are rejected with a 400 instead of being guessed. Because rebasing happens before storage, the item and search read paths return the same target. The helpers are available directly as `stac_fastapi.types.rebase.rebase_item` and `rebase_item_collection`.
+- `stac_fastapi.types.links.is_absolute_href`, and `resolve_links` now recognises any URI scheme (`s3://`, `file://`, ...) rather than only `http://` and `https://` when deciding whether an href is already absolute.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed

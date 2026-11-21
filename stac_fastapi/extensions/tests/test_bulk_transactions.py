@@ -310,3 +310,82 @@ def must_be_bob(
         detail="You're not Bob",
         headers={"WWW-Authenticate": "Basic"},
     )
+
+
+class RecordingBulkTransactionsClient(AsyncBaseBulkTransactionsClient):
+    """Record the Items the client receives so rebasing can be asserted."""
+
+    def __init__(self):
+        self.received: list[Items] = []
+
+    async def bulk_item_insert(self, items: Items, **kwargs) -> BulkTransaction:
+        self.received.append(items)
+        count = len(list(items))
+        return {"received": count, "success": count, "skipped": 0, "errors": []}
+
+
+def test_bulk_item_insert_rebases_relative_assets() -> None:
+    """Bulk import applies the same rebasing rules as single-item import."""
+    transactions_client = RecordingBulkTransactionsClient()
+    settings = ApiSettings()
+    api = StacApi(
+        settings=settings,
+        client=DummyCoreClient(),
+        extensions=[
+            BulkTransactionExtension(
+                client=transactions_client,
+                prefix_mappings={
+                    "https://stac.internal/catalog": "s3://catalog-bucket/catalog"
+                },
+            )
+        ],
+    )
+    item = {
+        "type": "Feature",
+        "stac_version": "1.0.0",
+        "id": "test_item",
+        "geometry": {"type": "Point", "coordinates": [-105, 40]},
+        "bbox": [-105, 40, -105, 40],
+        "properties": {"datetime": "2020-06-13T13:00:00Z"},
+        "links": [
+            {
+                "rel": "self",
+                "href": "https://stac.internal/catalog/collections/c/items/test_item",
+            }
+        ],
+        "assets": {"visual": {"href": "data/visual.tif"}},
+        "collection": "c",
+    }
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/collections/c/bulk_items",
+            json={"items": {"test_item": item}, "method": "insert"},
+        )
+
+    assert response.is_success, response.text
+    stored = transactions_client.received[-1].items["test_item"]
+    assert (
+        stored["assets"]["visual"]["href"]
+        == "s3://catalog-bucket/catalog/collections/c/items/data/visual.tif"
+    )
+
+
+def test_bulk_item_insert_without_mappings_is_unchanged(item: dict) -> None:
+    """Bulk import is a no-op unless prefix mappings are declared."""
+    transactions_client = RecordingBulkTransactionsClient()
+    settings = ApiSettings()
+    api = StacApi(
+        settings=settings,
+        client=DummyCoreClient(),
+        extensions=[BulkTransactionExtension(client=transactions_client)],
+    )
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/collections/a-collection/bulk_items",
+            json={"items": {item["id"]: item}, "method": "insert"},
+        )
+
+    assert response.is_success, response.text
+    assert transactions_client.received[-1].items["test_item"] == item
