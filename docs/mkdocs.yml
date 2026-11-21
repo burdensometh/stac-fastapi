@@ -19,6 +19,7 @@ extra:
 nav:
   - Home: "index.md"
   - Get started: "get-started.md"
+  - Federated collections: "federation.md"
   - Development - Contributing:
     - How to start: "contributing.md"
     - Tips and Tricks: tips-and-tricks.md
