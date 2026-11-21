@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- Optional collection extent maintenance, enabled with
+  `ApiSettings(maintain_collection_extents=True)` (or the
+  `MAINTAIN_COLLECTION_EXTENTS` environment variable). When enabled, creating,
+  updating, patching or deleting an Item recomputes the collection's spatial and
+  temporal extent from the Items that are actually stored, and `GET
+  /collections` and `GET /collections/{collection_id}` recompute it at read time
+  so that the extent always matches the committed Items. Deleting the Item that
+  defined an extreme shrinks the extent again; Items without a temporal
+  annotation are ignored instead of being dated "now"; a collection without Items
+  falls back to a world-wide spatial extent and an open temporal interval. The
+  recomputation runs through the core client's `item_collection`, so every
+  backend benefits without implementing anything new. The setting accepts the
+  aliases `UPDATE_COLLECTION_EXTENTS`, `COLLECTION_EXTENT_MAINTENANCE`,
+  `ENABLE_COLLECTION_EXTENT_MAINTENANCE`, `ENABLE_EXTENT_MAINTENANCE`,
+  `EXTENT_MAINTENANCE` and `MAINTAIN_EXTENTS`.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed

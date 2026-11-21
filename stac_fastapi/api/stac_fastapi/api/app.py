@@ -1,7 +1,10 @@
 """Fastapi app creation."""
 
+import functools
 import inspect
+import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import attr
 from brotli_asgi import BrotliMiddleware
@@ -38,7 +41,17 @@ from stac_fastapi.api.routes import (
 from stac_fastapi.types.config import ApiSettings, Settings
 from stac_fastapi.types.core import AsyncBaseCoreClient, BaseCoreClient
 from stac_fastapi.types.extension import ApiExtension
+from stac_fastapi.types.extents import (
+    aget_collection_items,
+    as_dict,
+    get_collection_items,
+    in_extent_maintenance,
+    maintenance_enabled,
+    refresh_collection_extent,
+)
 from stac_fastapi.types.search import BaseSearchGetRequest, BaseSearchPostRequest
+
+logger = logging.getLogger(__name__)
 
 
 @attr.s
@@ -161,6 +174,151 @@ class StacApi:
             if isinstance(ext, extension):
                 return ext
         return None
+
+    # ------------------------------------------------------------------
+    # Collection extent maintenance (opt-in)
+    # ------------------------------------------------------------------
+
+    def _extent_maintenance_enabled(self) -> bool:
+        return maintenance_enabled(self.settings)
+
+    def _refresh_collection_extent(
+        self, collection: Any, collection_id: str, request: Any
+    ) -> Any:
+        """Recompute a collection's extent from its Items (synchronous client)."""
+        try:
+            items = get_collection_items(self.client, collection_id, request=request)
+        except Exception:  # noqa: BLE001 - reads must not fail on maintenance
+            logger.exception("Could not read the Items of collection %s", collection_id)
+            return collection
+        return refresh_collection_extent(collection, items)
+
+    async def _arefresh_collection_extent(
+        self, collection: Any, collection_id: str, request: Any
+    ) -> Any:
+        """Recompute a collection's extent from its Items (asynchronous client)."""
+        try:
+            items = await aget_collection_items(
+                self.client, collection_id, request=request
+            )
+        except Exception:  # noqa: BLE001 - reads must not fail on maintenance
+            logger.exception("Could not read the Items of collection %s", collection_id)
+            return collection
+        return refresh_collection_extent(collection, items)
+
+    @staticmethod
+    def _collection_id(collection: Any) -> str | None:
+        data = as_dict(collection)
+        if isinstance(data, dict) and data.get("id") is not None:
+            return str(data["id"])
+        return None
+
+    def _refresh_collections(self, result: Any, request: Any) -> Any:
+        """Recompute every collection of a ``Collections`` response."""
+        data = as_dict(result)
+        if not isinstance(data, dict) or "collections" not in data:
+            return result
+        refreshed = []
+        for collection in data["collections"]:
+            collection_id = self._collection_id(collection)
+            if collection_id is None:
+                refreshed.append(collection)
+                continue
+            refreshed.append(
+                self._refresh_collection_extent(
+                    as_dict(collection), collection_id, request
+                )
+            )
+        data = dict(data)
+        data["collections"] = refreshed
+        return data
+
+    async def _arefresh_collections(self, result: Any, request: Any) -> Any:
+        """Asynchronous variant of :meth:`_refresh_collections`."""
+        data = as_dict(result)
+        if not isinstance(data, dict) or "collections" not in data:
+            return result
+        refreshed = []
+        for collection in data["collections"]:
+            collection_id = self._collection_id(collection)
+            if collection_id is None:
+                refreshed.append(collection)
+                continue
+            refreshed.append(
+                await self._arefresh_collection_extent(
+                    as_dict(collection), collection_id, request
+                )
+            )
+        data = dict(data)
+        data["collections"] = refreshed
+        return data
+
+    def _wrap_collection_reads(self) -> None:
+        """Make collection reads reflect the extents of the committed Items.
+
+        When extent maintenance is enabled, ``get_collection`` and
+        ``all_collections`` recompute the extent from the Items that are stored
+        at read time, so the returned extent cannot lag behind the Items.
+        """
+        if not self._extent_maintenance_enabled():
+            return
+
+        client = self.client
+        original_get_collection = client.get_collection
+        original_all_collections = client.all_collections
+
+        get_collection = self._maintained_get_collection(original_get_collection)
+        all_collections = self._maintained_all_collections(original_all_collections)
+        client.get_collection = get_collection  # type: ignore[method-assign]
+        client.all_collections = all_collections  # type: ignore[method-assign]
+
+    def _maintained_get_collection(self, original: Any) -> Any:
+        """Wrap ``get_collection`` so its extent matches the stored Items."""
+        if inspect.iscoroutinefunction(original):
+
+            @functools.wraps(original)
+            async def get_collection(collection_id: str, **kwargs: Any) -> Any:
+                collection = await original(collection_id, **kwargs)
+                if in_extent_maintenance():
+                    return collection
+                return await self._arefresh_collection_extent(
+                    collection, collection_id, kwargs.get("request")
+                )
+
+        else:
+
+            @functools.wraps(original)
+            def get_collection(collection_id: str, **kwargs: Any) -> Any:
+                collection = original(collection_id, **kwargs)
+                if in_extent_maintenance():
+                    return collection
+                return self._refresh_collection_extent(
+                    collection, collection_id, kwargs.get("request")
+                )
+
+        return get_collection
+
+    def _maintained_all_collections(self, original: Any) -> Any:
+        """Wrap ``all_collections`` so its extents match the stored Items."""
+        if inspect.iscoroutinefunction(original):
+
+            @functools.wraps(original)
+            async def all_collections(**kwargs: Any) -> Any:
+                result = await original(**kwargs)
+                if in_extent_maintenance():
+                    return result
+                return await self._arefresh_collections(result, kwargs.get("request"))
+
+        else:
+
+            @functools.wraps(original)
+            def all_collections(**kwargs: Any) -> Any:
+                result = original(**kwargs)
+                if in_extent_maintenance():
+                    return result
+                return self._refresh_collections(result, kwargs.get("request"))
+
+        return all_collections
 
     def register_landing_page(self) -> None:
         """Register landing page (GET /)."""
@@ -456,6 +614,13 @@ class StacApi:
 
         Settings.set(self.settings)
         self.app.state.settings = self.settings
+        # Expose the core client so extensions (e.g. extent maintenance in the
+        # Transaction extension) can read Items.
+        self.app.state.client = self.client
+
+        # Make collection reads reflect the Items (opt-in, see
+        # `maintain_collection_extents`).
+        self._wrap_collection_reads()
 
         # Register core STAC endpoints
         self.register_core()

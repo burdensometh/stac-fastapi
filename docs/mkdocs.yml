@@ -84,6 +84,7 @@ nav:
           - conformance: api/stac_fastapi/types/conformance.md
           - core: api/stac_fastapi/types/core.md
           - errors: api/stac_fastapi/types/errors.md
+          - extents: api/stac_fastapi/types/extents.md
           - extension: api/stac_fastapi/types/extension.md
           - links: api/stac_fastapi/types/links.md
           - requests: api/stac_fastapi/types/requests.md

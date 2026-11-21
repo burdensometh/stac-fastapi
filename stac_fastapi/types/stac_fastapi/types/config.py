@@ -3,10 +3,22 @@
 import logging
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
+
+#: Names accepted for :attr:`ApiSettings.maintain_collection_extents`, for both
+#: keyword arguments and environment variables.
+COLLECTION_EXTENT_MAINTENANCE_ALIASES = (
+    "maintain_collection_extents",
+    "update_collection_extents",
+    "collection_extent_maintenance",
+    "enable_collection_extent_maintenance",
+    "enable_extent_maintenance",
+    "extent_maintenance",
+    "maintain_extents",
+)
 
 
 class ApiSettings(BaseSettings):
@@ -33,6 +45,15 @@ class ApiSettings(BaseSettings):
 
     # Enable direct `Response` from endpoint, skipping validation and serialization
     enable_direct_response: bool = False
+
+    # Recompute a collection's spatial and temporal extent from its Items after
+    # an Item is created, updated, patched or deleted, and when a collection is
+    # read.  Opt-in so that backends which maintain the extent themselves keep
+    # their current behavior.
+    maintain_collection_extents: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(*COLLECTION_EXTENT_MAINTENANCE_ALIASES),
+    )
 
     openapi_url: str = "/api"
     docs_url: str = "/api.html"

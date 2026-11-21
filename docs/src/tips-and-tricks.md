@@ -2,6 +2,52 @@
 
 This page contains a few 'tips and tricks' for getting **stac-fastapi** working in various situations.
 
+## Keep a collection's extent in sync with its Items
+
+A collection stored with an `extent` can go stale: once an Item lies outside of
+that extent, searching items by the collection's extent misses it even though
+`GET /collections/{collection_id}/items/{item_id}` returns it.
+
+Set `maintain_collection_extents` to recompute the extent from the Items that are
+actually stored:
+
+```python
+from stac_fastapi.types.config import ApiSettings
+
+settings = ApiSettings(maintain_collection_extents=True)
+```
+
+or via the environment:
+
+```env
+MAINTAIN_COLLECTION_EXTENTS=true
+```
+
+When enabled:
+
+- creating, updating, patching or deleting an Item recomputes the collection's
+  spatial and temporal extent from all of its Items;
+- `GET /collections` and `GET /collections/{collection_id}` recompute it at read
+  time, so the response always matches the committed Items;
+- deleting the Item that defined an extreme shrinks the extent again (it is
+  recomputed, not just widened);
+- an Item without `datetime`/`start_datetime`/`end_datetime` is ignored by the
+  temporal extent and is never dated "now";
+- a collection without Items has a world-wide spatial extent
+  (`[[-180, -90, 180, 90]]`) and an open temporal interval (`[[null, null]]`).
+
+The recomputation reads Items through the core client's `item_collection`, so no
+backend changes are required. The setting is disabled by default. For
+compatibility, the aliases `UPDATE_COLLECTION_EXTENTS`,
+`COLLECTION_EXTENT_MAINTENANCE`, `ENABLE_COLLECTION_EXTENT_MAINTENANCE`,
+`ENABLE_EXTENT_MAINTENANCE`, `EXTENT_MAINTENANCE` and `MAINTAIN_EXTENTS` are
+accepted as well.
+
+To use the helpers directly, import from `stac_fastapi.types.extents`, for
+example `compute_collection_extent(items)` to compute an extent object or
+`apply_extent(collection, items)` to get a copy of a collection with a
+recomputed extent.
+
 ## Avoid FastAPI (slow) serialization
 
 When not using Pydantic validation for responses, FastAPI will still use a complex (slow) [serialization process](https://github.com/fastapi/fastapi/discussions/8165).
