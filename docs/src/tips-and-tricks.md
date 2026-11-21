@@ -10,7 +10,79 @@ Starting with stac-fastapi `5.2.0`, we've added `ENABLE_DIRECT_RESPONSE` option 
 
 Ref: https://github.com/stac-utils/stac-fastapi-elasticsearch-opensearch/issues/347
 
-## Application Middlewares
+## Conditional PATCH Item requests
+
+Two ingestion jobs may patch the same Item at the same time. Without a check,
+the one which writes last wins even when it computed its patch from a version
+of the Item that is no longer current, so an attribute which was already
+updated gets overwritten with stale data.
+
+A client can avoid this by sending the version of the Item it read with its
+patch. Every single-Item response carries the Item's version in an `ETag`
+header, and `PATCH /collections/{collection_id}/items/{item_id}` accepts it in
+either of two ways:
+
+- the `If-Match` header, with the `ETag` value a read returned, or
+- the `expected_version` query parameter, with the same value.
+
+The patch keeps its usual JSON Patch (`application/json-patch+json`) or merge
+patch (`application/merge-patch+json`, `application/json`) body. A request
+which sends no version is applied as before, so existing clients keep working.
+
+```bash
+# Read the item and keep its version.
+etag=$(curl -sI 'http://localhost:8080/collections/c/items/i' \
+  | awk 'tolower($1) == "etag:" { print $2 }' | tr -d '\r')
+
+# Patch it only if it is still that version.
+curl -X PATCH 'http://localhost:8080/collections/c/items/i' \
+  -H 'Content-Type: application/merge-patch+json' \
+  -H "If-Match: $etag" \
+  -d '{"properties": {"foo": "bar"}}'
+```
+
+If the Item changed since it was read, the request fails with `409 Conflict`
+and nothing is written: the stored Item and the results of later reads are
+unchanged. Read the Item again, recompute the patch from the new content and
+resubmit with the new version. The successful response carries the new `ETag`.
+
+`If-Match: *` matches any current Item, and a list of tags matches when one of
+them does, as in RFC 9110.
+
+### Backend implementations
+
+The API layer passes the version to `patch_item` as `expected_version`; it is
+absent when the request has none. A client which implements versions must, in
+one atomic step:
+
+1. read the stored Item,
+2. compare its version with `expected_version`,
+3. compute the patched Item, and
+4. write it.
+
+`stac_fastapi.types.patch.conditional_patch` does steps 2 and 3 without
+modifying the Item it is given, and raises `VersionConflictError` (a
+`ConflictError`, answered with `409`) when the versions differ, so steps 1 and
+4 only need to be in the same transaction or lock:
+
+```python
+from stac_fastapi.types.patch import conditional_patch
+
+async def patch_item(self, collection_id, item_id, patch, expected_version=None, **kwargs):
+    async with self.connection(collection_id) as connection:
+        stored = await connection.read_item(item_id)
+        patched = conditional_patch(stored, patch, expected_version)
+        await connection.write_item(patched)
+    return patched
+```
+
+`stac_fastapi.types.etag.item_version` derives a version from an Item's content,
+so a backend which keeps no version counter of its own can compute one from the
+Item it stores and offer it as the `ETag`. A backend with a native version (a
+sequence number, a row version, ...) uses that instead and may record it for
+the response with `stac_fastapi.api.etag.set_etag`.
+
+
 
 By default the `StacApi` class will enable 3 Middlewares (`BrotliMiddleware`, `CORSMiddleware` and `ProxyHeaderMiddleware`). You may want to overwrite the defaults configuration by editing your backend's `app.py`:
 

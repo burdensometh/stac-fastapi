@@ -1,11 +1,12 @@
 """Transaction extension."""
 
-from collections.abc import Sequence
+import inspect
+from collections.abc import Callable, Sequence
 from enum import StrEnum
 from typing import Annotated, Any
 
 import attr
-from fastapi import APIRouter, Body, FastAPI
+from fastapi import APIRouter, Body, FastAPI, Header, Query
 from fastapi.params import Depends
 from pydantic import TypeAdapter
 from stac_pydantic import Collection, Item, ItemCollection
@@ -50,12 +51,62 @@ class PutItem(ItemUri):
 
 @attr.s
 class PatchItem(ItemUri):
-    """Patch Item."""
+    """Patch Item.
+
+    A conditional patch carries the version of the Item the client read: in the
+    ``If-Match`` header, as a normal `ETag` read, or in the
+    ``expected_version`` query parameter (``version`` is accepted as an
+    alias).  A patch which carries none of them is applied as before.
+    """
 
     patch: Annotated[
         PartialItem | list[PatchOperation],
         Body(),
     ] = attr.ib(default=None)
+    if_match: Annotated[
+        str | None,
+        Header(
+            alias="If-Match",
+            description=(
+                "Patch the item only if its current version is listed here. "
+                "Read the item to get its version from the ETag response header."
+            ),
+        ),
+    ] = attr.ib(default=None)
+    expected_version: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Patch the item only if its current version is this value. "
+                "Same as sending the version in If-Match."
+            ),
+        ),
+    ] = attr.ib(default=None)
+    version: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Alias of `expected_version`: patch the item only if its current "
+                "version is this value."
+            ),
+        ),
+    ] = attr.ib(default=None)
+
+    def kwargs(self) -> dict:
+        """Transform api request params into the endpoint's arguments.
+
+        A version is forwarded only when the client sent one, so a request
+        without a version calls `patch_item` exactly as before.
+        """
+        params: dict[str, Any] = {
+            "collection_id": self.collection_id,
+            "item_id": self.item_id,
+            "patch": self.patch,
+        }
+        expected_version = self.expected_version or self.version or self.if_match
+        if expected_version is not None:
+            params["expected_version"] = expected_version
+        return params
 
 
 @attr.s
@@ -165,6 +216,63 @@ def _location_url(request: Request, route_name: str, **path_params: str) -> str:
     except NoMatchFound:
         *_, resource_id = path_params.values()
         return f"{request.base_url}{request.url.path.lstrip('/')}/{resource_id}"
+
+
+def _patch_item_endpoint(func: Callable) -> Callable:
+    """Return a `patch_item` endpoint which forwards a version when it can.
+
+    The version is a newer argument of `patch_item`.  A client written before
+    it was added does not accept it, so it is forwarded only when the client's
+    signature takes it (or `**kwargs`); such a client applies the patch without
+    the version, as it did before.
+    """
+    try:
+        parameters = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        # An uninspectable callable: assume it takes what it is given.
+        return func
+    takes_version = "expected_version" in parameters or any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    if takes_version:
+        return func
+
+    def without_version(kwargs: dict) -> dict:
+        """Drop the version a legacy client cannot accept."""
+        kwargs.pop("expected_version", None)
+        return kwargs
+
+    def patch_without_version(
+        collection_id: str,
+        item_id: str,
+        patch: PartialItem | list[PatchOperation],
+        **kwargs,
+    ):
+        return func(
+            collection_id=collection_id,
+            item_id=item_id,
+            patch=patch,
+            **without_version(kwargs),
+        )
+
+    if inspect.iscoroutinefunction(func):
+
+        async def patch_without_version_async(
+            collection_id: str,
+            item_id: str,
+            patch: PartialItem | list[PatchOperation],
+            **kwargs,
+        ):
+            return await func(
+                collection_id=collection_id,
+                item_id=item_id,
+                patch=patch,
+                **without_version(kwargs),
+            )
+
+        return patch_without_version_async
+    return patch_without_version
 
 
 @attr.s
@@ -284,7 +392,14 @@ class TransactionExtension(ApiExtension):
 
     def register_patch_item(self):
         """Register patch item endpoint (PATCH
-        /collections/{collection_id}/items/{item_id})."""
+        /collections/{collection_id}/items/{item_id}).
+
+        The endpoint passes the version the client sent -- in `If-Match` or in
+        the `expected_version` query parameter -- to the client, which compares
+        it against the stored item and applies the patch only if they match.
+        A mismatch raises `VersionConflictError`, which the API answers with
+        409 without writing anything.
+        """
         self.router.add_api_route(
             name="Patch Item",
             path="/collections/{collection_id}/items/{item_id}",
@@ -295,7 +410,22 @@ class TransactionExtension(ApiExtension):
                         MimeTypes.geojson.value: {},
                     },
                     "model": Item,
-                }
+                    "headers": {
+                        "ETag": {
+                            "description": "The version of the patched Item.",
+                            "schema": {"type": "string"},
+                        }
+                    },
+                },
+                409: {
+                    "description": (
+                        "Conflict: the Item changed since the expected version; "
+                        "nothing was written."
+                    ),
+                    "content": {
+                        MimeTypes.json.value: {},
+                    },
+                },
             },
             openapi_extra={
                 "requestBody": {
@@ -318,7 +448,7 @@ class TransactionExtension(ApiExtension):
             response_model_exclude_none=True,
             methods=["PATCH"],
             endpoint=create_async_endpoint(
-                self.client.patch_item,
+                _patch_item_endpoint(self.client.patch_item),
                 PatchItem,
             ),
             dependencies=self.route_dependencies,

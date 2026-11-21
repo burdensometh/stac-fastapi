@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Optional expected version on `PATCH /collections/{collection_id}/items/{item_id}` so a patch computed from stale data does not overwrite an Item which changed in between. The version is sent in the `If-Match` header (the `ETag` of a normal Item read) or in the `expected_version` query parameter; the patch body keeps its JSON Patch or merge patch format. A mismatch returns `409 Conflict` and writes nothing, and a client can read the Item again and resubmit. A request without a version is applied as before. `BaseTransactionsClient.patch_item` and `AsyncBaseTransactionsClient.patch_item` take an optional `expected_version` argument. The API adds an `ETag` header to single-Item responses, and `stac_fastapi.types.etag`, `stac_fastapi.types.patch` and `stac_fastapi.api.etag` help a backend perform the version comparison, the patch computation and the write as one step.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed

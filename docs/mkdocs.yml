@@ -30,6 +30,7 @@ nav:
           - app: api/stac_fastapi/api/app.md
           - config: api/stac_fastapi/api/config.md
           - errors: api/stac_fastapi/api/errors.md
+          - etag: api/stac_fastapi/api/etag.md
           - metrics: api/stac_fastapi/api/metrics.md
           - middleware: api/stac_fastapi/api/middleware.md
           - models: api/stac_fastapi/api/models.md
@@ -84,8 +85,10 @@ nav:
           - conformance: api/stac_fastapi/types/conformance.md
           - core: api/stac_fastapi/types/core.md
           - errors: api/stac_fastapi/types/errors.md
+          - etag: api/stac_fastapi/types/etag.md
           - extension: api/stac_fastapi/types/extension.md
           - links: api/stac_fastapi/types/links.md
+          - patch: api/stac_fastapi/types/patch.md
           - requests: api/stac_fastapi/types/requests.md
           - rfc3339: api/stac_fastapi/types/rfc3339.md
           - search: api/stac_fastapi/types/search.md

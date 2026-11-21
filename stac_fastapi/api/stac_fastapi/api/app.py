@@ -17,6 +17,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
 from stac_fastapi.api.errors import DEFAULT_STATUS_CODES, add_exception_handlers
+from stac_fastapi.api.etag import ETagMiddleware
 from stac_fastapi.api.middleware import ProxyHeaderMiddleware
 from stac_fastapi.api.models import (
     APIRequest,
@@ -129,6 +130,10 @@ class StacApi:
     middlewares: list[Middleware] = attr.ib(
         default=attr.Factory(
             lambda: [
+                # Innermost (the list is inserted at the front in order), so it
+                # sees the body before it is compressed: the ETag names the
+                # Item, and compression leaves it unchanged.
+                Middleware(ETagMiddleware),
                 Middleware(BrotliMiddleware),
                 Middleware(
                     CORSMiddleware,
@@ -475,11 +480,17 @@ class StacApi:
         # register exception handlers
         add_exception_handlers(self.app, status_codes=self.exceptions)
 
-        # add middlewares
+        # add middlewares. `insert(0, ...)` makes the first one inserted the
+        # innermost, so the ETag middleware goes first: it sees the response
+        # body before a compression middleware replaces it, and it runs for a
+        # custom middleware list too.
         if self.middlewares and self.app.middleware_stack is not None:
             raise RuntimeError("Cannot add middleware after an application has started")
 
-        for middleware in self.middlewares:
+        middlewares = self.middlewares
+        if not any(middleware.cls is ETagMiddleware for middleware in middlewares):
+            middlewares = [Middleware(ETagMiddleware), *middlewares]
+        for middleware in middlewares:
             self.app.user_middleware.insert(0, middleware)
 
         if self.add_metrics:

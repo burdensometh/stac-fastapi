@@ -61,6 +61,7 @@ class BaseTransactionsClient(abc.ABC):
         collection_id: str,
         item_id: str,
         patch: PartialItem | list[PatchOperation],
+        expected_version: str | None = None,
         **kwargs,
     ) -> stac.Item | Response | None:
         """Update an item from a collection.
@@ -76,10 +77,24 @@ class BaseTransactionsClient(abc.ABC):
 
             return item
 
+        A client which implements versions applies the patch only if the
+        stored item is still `expected_version`: it reads the item, compares
+        its version, computes the patched item and writes it as one step, so
+        a failed comparison writes nothing and leaves the stored item, and the
+        results of later reads, unchanged.  It raises
+        `stac_fastapi.types.errors.VersionConflictError` (a `ConflictError`,
+        which the API answers with 409) when the versions differ.
+
+        `stac_fastapi.types.patch.conditional_patch` does the comparison and
+        the patch computation for a client which has read the stored item.
+        When `expected_version` is None the patch is applied as before, so a
+        client without version support keeps working.
+
         Args:
             item_id: id of the item.
             collection_id: id of the collection.
             patch: either the partial item or list of patch operations.
+            expected_version: the version the client read, if it sent one.
 
         Returns:
             The patched item.
@@ -234,6 +249,7 @@ class AsyncBaseTransactionsClient(abc.ABC):
         collection_id: str,
         item_id: str,
         patch: PartialItem | list[PatchOperation],
+        expected_version: str | None = None,
         **kwargs,
     ) -> stac.Item | Response | None:
         """Update an item from a collection.
@@ -249,10 +265,24 @@ class AsyncBaseTransactionsClient(abc.ABC):
 
             return item
 
+        A client which implements versions applies the patch only if the
+        stored item is still `expected_version`: it reads the item, compares
+        its version, computes the patched item and writes it as one step, so
+        a failed comparison writes nothing and leaves the stored item, and the
+        results of later reads, unchanged.  It raises
+        `stac_fastapi.types.errors.VersionConflictError` (a `ConflictError`,
+        which the API answers with 409) when the versions differ.
+
+        `stac_fastapi.types.patch.conditional_patch` does the comparison and
+        the patch computation for a client which has read the stored item.
+        When `expected_version` is None the patch is applied as before, so a
+        client without version support keeps working.
+
         Args:
             item_id: id of the item.
             collection_id: id of the collection.
             patch: either the partial item or list of patch operations.
+            expected_version: the version the client read, if it sent one.
 
         Returns:
             The patched item.

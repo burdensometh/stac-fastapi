@@ -13,6 +13,28 @@ class ConflictError(StacApiError):
     pass
 
 
+class VersionConflictError(ConflictError):
+    """An Item changed since the version a write expected.
+
+    Raised by a client whose conditional write found that the stored Item's
+    version differs from the caller's expected version.  Nothing is written,
+    so the stored Item and the results of subsequent reads are unchanged.
+    """
+
+    pass
+
+
+class PatchError(StacApiError, ValueError):
+    """A patch cannot be applied to the Item.
+
+    Raised when a JSON Patch operation fails (a missing member, an out-of-range
+    index, a failed ``test``, an unknown operation) or when the patch is
+    neither a merge patch nor a list of operations.  Nothing is written.
+    """
+
+    pass
+
+
 class NotFoundError(StacApiError):
     """Resource not found."""
 

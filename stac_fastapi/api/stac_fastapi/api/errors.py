@@ -17,6 +17,7 @@ from stac_fastapi.types.errors import (
     ForeignKeyError,
     InvalidQueryParameter,
     NotFoundError,
+    PatchError,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ DEFAULT_STATUS_CODES = {
     ForeignKeyError: status.HTTP_424_FAILED_DEPENDENCY,
     DatabaseError: status.HTTP_424_FAILED_DEPENDENCY,
     InvalidQueryParameter: status.HTTP_400_BAD_REQUEST,
+    PatchError: status.HTTP_400_BAD_REQUEST,
     ResponseValidationError: status.HTTP_500_INTERNAL_SERVER_ERROR,
 }
 
