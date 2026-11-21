@@ -17,6 +17,8 @@ from starlette.responses import Response
 from starlette.routing import BaseRoute, Match
 from starlette.status import HTTP_204_NO_CONTENT
 
+from stac_fastapi.types.config import Settings
+from stac_fastapi.types.fields import get_fields_projection, trim_payload
 from stac_fastapi.types.search import APIRequest
 
 
@@ -25,6 +27,70 @@ def _wrap_response(resp: Any) -> Any:
         return resp
     else:  # None is returned as 204 No Content
         return Response(status_code=HTTP_204_NO_CONTENT)
+
+
+def _response_models_enabled() -> bool:
+    """Whether response-model validation is on for this application."""
+    try:
+        return Settings.get().enable_response_models
+    except ValueError:  # Settings not initialised (e.g. a bare FastAPI app)
+        return False
+
+
+def _apply_fields(request_data: Any, resp: Any) -> Any:
+    """Trim a dict payload to the fields the client asked for.
+
+    Backends that support column projection already return only the requested
+    fields, and trimming is then a no-op. This is what keeps backends that do
+    not support projection working: they may return full documents and the API
+    layer trims them precisely, including nested paths such as
+    ``assets.preview.href``.
+
+    ``Response`` objects are returned untouched: the backend has serialized
+    them itself, usually to bypass response-model validation for a projection
+    that produces a non STAC-compliant item. When response-model validation is
+    enabled, trimming is left to the backend for the same reason (a trimmed
+    Item may legitimately not validate), matching the documented contract.
+    """
+    if resp is None or isinstance(resp, Response):
+        return resp
+    projection = get_fields_projection(request_data)
+    if projection is None:
+        return resp
+    if _response_models_enabled():
+        return resp
+    return trim_payload(resp, projection)
+
+
+def _accepts_fields_projection(func: Callable) -> bool:
+    """Whether ``func`` can receive the ``fields_projection`` keyword."""
+    try:
+        parameters = inspect.signature(func).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters)
+
+
+def _fields_kwargs(request_data: Any, func: Callable) -> dict[str, Any]:
+    """Keyword arguments carrying the resolved field selection to a backend.
+
+    Both ``GET`` and ``POST`` searches reach their client through this helper,
+    so a backend sees the same ``fields_projection`` no matter the verb. The
+    projection exposes :meth:`FieldsProjection.backend_fields`, the exact set
+    of columns to read, which already accounts for the pagination identity and
+    for the fields used by filtering and sorting.
+
+    Nothing is injected when the request carries no field selection, when the
+    selection is empty, or when the client does not accept extra keyword
+    arguments, so backends that never use the Fields extension see an
+    unchanged call.
+    """
+    projection = get_fields_projection(request_data)
+    if projection is None or projection.empty:
+        return {}
+    if not _accepts_fields_projection(func):
+        return {}
+    return {"fields_projection": projection}
 
 
 def sync_to_async(func):
@@ -55,19 +121,33 @@ def create_async_endpoint(
 
         async def _endpoint(request: Request, request_data: dict[str, Any]):
             """Endpoint."""
-            return _wrap_response(await func(request_data, request=request))
+            resp = await func(
+                request_data, request=request, **_fields_kwargs(request_data, func)
+            )
+            return _wrap_response(_apply_fields(request_data, resp))
 
     elif issubclass(request_model, APIRequest):
 
         async def _endpoint(request: Request, request_data=Depends(request_model)):  # type: ignore
             """Endpoint."""
-            return _wrap_response(await func(request=request, **request_data.kwargs()))
+            kwargs = request_data.kwargs()
+            # Never shadow a value the request model already produced.
+            fields_kwargs = {
+                key: value
+                for key, value in _fields_kwargs(request_data, func).items()
+                if key not in kwargs
+            }
+            resp = await func(request=request, **kwargs, **fields_kwargs)
+            return _wrap_response(_apply_fields(request_data, resp))
 
     elif issubclass(request_model, BaseModel):
 
         async def _endpoint(request: Request, request_data: request_model):  # type: ignore
             """Endpoint."""
-            return _wrap_response(await func(request_data, request=request))
+            resp = await func(
+                request_data, request=request, **_fields_kwargs(request_data, func)
+            )
+            return _wrap_response(_apply_fields(request_data, resp))
 
     else:
         raise ValueError(f"Unsupported type for request model {type(request_model)}")

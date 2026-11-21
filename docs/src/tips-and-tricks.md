@@ -81,6 +81,46 @@ stac = StacApi(
 )
 ```
 
+## Fields projection in the backend
+
+The [**Fields** extension](https://github.com/stac-api-extensions/fields) lets a
+client ask for only a subset of an Item, for example
+`?fields=assets.preview.href`. `stac-fastapi` resolves the selection once, in
+`stac_fastapi.types.fields.FieldsProjection`, so `GET` and `POST` share the same
+include/exclude precedence rules and the same deep trimming.
+
+A backend that supports column projection can read only what it needs:
+
+```python
+from stac_fastapi.types.fields import get_backend_projection
+
+class MyClient(BaseCoreClient):
+    def get_search(self, **kwargs):
+        # `["assets.preview.href", "collection", "id", "stac_version", "type"]`
+        # or `None` when the client did not ask for an include selection.
+        columns = get_backend_projection(kwargs)
+        ...
+```
+
+The projection handed to the backend (the `fields_projection` keyword) already
+contains everything else it still has to read:
+
+* the pagination identity (`id`, `collection`) and the structural markers
+  (`type`, `stac_version`);
+* any field referenced by `filter` or `sortby`, which the backend must evaluate
+  even when the client did not ask to receive it.
+
+`get_backend_projection(...)` returns `None` for searches that only exclude
+fields, so a backend can keep reading full documents in that case. When it
+returns a list, `filter_fields` can be used to build the exact response from
+the columns that were read.
+
+Backends that do not support column projection do not need to change. The API
+layer trims nested paths from the returned items, so returning full documents
+still produces the requested projection. When response-model validation is
+enabled, a backend must return a `JSONResponse` to bypass validation for a
+projection that yields a non STAC-compliant item, as before.
+
 ## Sort Extension (v1.1.0)
 
 The Sort extension adds sorting capabilities to the STAC API. As of v1.1.0, it also introduces `/sortables` endpoints that allow clients to discover which fields can be used for sorting.

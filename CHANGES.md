@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Unified `GET` and `POST` handling of the Fields extension through a single `FieldsProjection` (`stac_fastapi.types.fields`). Both verbs now resolve include/exclude with the same precedence rules, and a backend receives the exact columns it should read via the `fields_projection` keyword. The projection keeps the pagination identity (`id`, `collection`), the structural markers (`type`, `stac_version`) and any field referenced by `filter` or `sortby`, so those remain readable even when they are not returned. Backends that do not support column projection keep working: the API layer trims nested paths such as `assets.preview.href` from the response.
+
 ## [7.1.1] - 2026-11-02
 
 ### Fixed
